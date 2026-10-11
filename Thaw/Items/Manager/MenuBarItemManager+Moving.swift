@@ -2151,7 +2151,8 @@ extension MenuBarItemManager {
                 continue
             }
 
-            var liveItems = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            // Visible takes its items from the wait below, so a full read here is thrown away.
+            var liveItems = section == .visible ? [] : await MenuBarItem.getMenuBarItems(option: .activeSpace)
 
             // A newcomer from a hidden section can take seconds to republish,
             // and one missing from the snapshot keeps its far-side weight.
@@ -2476,7 +2477,7 @@ extension MenuBarItemManager {
         let liveIDs = Set(refreshed.map(\.uniqueIdentifier))
         missingRepublishMemo.noteArrived(wantedIDs.intersection(liveIDs))
         var updatedOrder = desiredOrder
-        let missing = wantedIDs.subtracting(liveIDs)
+        let missing = RepublishAbsenceMemo.absentees(wanted: wantedIDs, live: liveIDs)
         if !missing.isEmpty {
             missingRepublishMemo.noteMissing(missing, at: .now)
             // Named, not counted: a count cannot say which app lagged.
@@ -2662,7 +2663,10 @@ extension MenuBarItemManager {
         deadline: ContinuousClock.Instant? = nil,
         interval: Duration = Constants.MenuBarTuning.menuBarAgentResortPollInterval,
         earlyBailProbe: Duration? = nil,
-        enumerate: () async -> [MenuBarItem]? = { await MenuBarItem.getMenuBarItems(option: .activeSpace, freshOnly: true) },
+        // Known owners first: a general read took 0.7 to 1.5 s per poll with 124 apps running.
+        enumerate: () async -> [MenuBarItem]? = {
+            await DragGeometrySource.items { await MenuBarItem.getMenuBarItems(option: .activeSpace, freshOnly: true) }
+        },
         isSatisfied: ([MenuBarItem]) -> Bool
     ) async -> MenuBarAgentLayoutWaitResult {
         guard var liveItems = await enumerate() else {
@@ -3069,7 +3073,7 @@ extension MenuBarItemManager {
             enumerateItems: {
                 // currentBounds matches on tag alone, so a recovery here would
                 // start the drag on empty menu bar.
-                await Self.dragGeometry(from: MenuBarItem.getMenuBarItems(option: .activeSpace))
+                await DragGeometrySource.items(moving: item, beside: destination.targetItem) { await Self.dragGeometry(from: MenuBarItem.getMenuBarItems(option: .activeSpace)) }
             }
         )
         engine.cursorWatchdogTimeout = watchdogTimeout
