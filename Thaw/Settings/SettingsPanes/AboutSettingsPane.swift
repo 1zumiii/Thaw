@@ -211,9 +211,8 @@ struct AboutSettingsPane: View {
 
     // MARK: Updates
 
-    /// Pickers are made borderless explicitly, since outside a Form they
-    /// default to bordered. The two Sparkle switches are one picker:
-    /// downloading implies checking.
+    /// The pickers are borderless explicitly: outside a Form they default to bordered.
+    /// Automatic updates is the same choice the Privacy pane lists with the network calls.
     private var updates: some View {
         VStack(spacing: 0) {
             updateRow("Update channel") {
@@ -227,10 +226,10 @@ struct AboutSettingsPane: View {
             }
             Divider()
             updateRow("Automatic updates") {
-                Picker("Automatic updates", selection: automaticUpdatesMode) {
-                    Text("Off").tag(AutomaticUpdates.off)
-                    Text("Check only").tag(AutomaticUpdates.check)
-                    Text("Check and download").tag(AutomaticUpdates.download)
+                Picker("Automatic updates", selection: $updatesManager.automaticUpdates) {
+                    ForEach(AutomaticUpdates.allCases) { mode in
+                        Text(mode.localized).tag(mode)
+                    }
                 }
                 .pickerStyle(.menu)
                 .buttonStyle(.borderless)
@@ -276,22 +275,6 @@ struct AboutSettingsPane: View {
         }
         let formatted = date.formatted(date: .abbreviated, time: .shortened)
         return "Last checked \(formatted)"
-    }
-
-    private enum AutomaticUpdates: Hashable {
-        case off, check, download
-    }
-
-    private var automaticUpdatesMode: Binding<AutomaticUpdates> {
-        Binding {
-            if !updatesManager.automaticallyChecksForUpdates {
-                return .off
-            }
-            return updatesManager.automaticallyDownloadsUpdates ? .download : .check
-        } set: { mode in
-            updatesManager.automaticallyChecksForUpdates = mode != .off
-            updatesManager.automaticallyDownloadsUpdates = mode == .download
-        }
     }
 
     // MARK: Helpers
