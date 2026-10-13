@@ -30,6 +30,10 @@ the items under New and Fixed.
 
 - **Items Control Center hosts without a namable owner can be moved again.** With iPhone mirroring, the Live Activity is a Control Center slot no pass can name an owner for. It was moved with a teleport, which stamps its press at the *destination* — 41 pt outside the item — and posts no dragged step at all. Control Center ignores a press that lands outside the item, so eight identical attempts timed out with the cursor held for eight seconds. Such an item now gets a real drag: the press lands on the item itself and the pointer travels. Measured on macOS 26.7 that is the only gesture which both reaches the item and survives — a press released without travel is moved and then put straight back by macOS. When even a real drag is ignored, the move stops after two attempts and names the reason in the log instead of running the whole budget. Reported with a move diagnostic by @mi3suuu.
 
+#### Smaller things
+
+- **"Don't ask again" now sticks when you click Cancel** in the spacing relaunch prompt. Thaw switches to "Wait until next restart", so a display change no longer asks and no longer relaunches apps.
+
 ## [3.0.0-alpha.8] - 2026-10-11
 **macOS 27 only · Build 113**
 
