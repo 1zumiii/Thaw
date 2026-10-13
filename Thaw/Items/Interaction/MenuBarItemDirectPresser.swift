@@ -26,6 +26,7 @@ nonisolated enum MenuBarItemDirectPresser {
     /// where a hung app would hold the desktop's input.
     @concurrent
     static func press(item: MenuBarItem) async -> ClickReactionVerifier.Reaction? {
+        guard item.isOnScreen, !item.bounds.isEmpty else { return nil }
         guard AXHelpers.isProcessTrusted() else {
             diagLog.info("press: not trusted for accessibility")
             return nil

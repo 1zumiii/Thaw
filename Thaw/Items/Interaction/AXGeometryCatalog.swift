@@ -216,13 +216,31 @@ nonisolated enum AXGeometryCatalog {
                 guard canContinue(until: deadline), visited < maxElementsVisited else { break }
                 try? child.setMessagingTimeout(messagingTimeout)
                 let namespace = MenuBarItemAXProvider.namespace(forBundleIdentifier: host.bundleIdentifier)
-                let attributes = AXHelpers.menuBarChildAttributes(for: child)
+                let attributes = AXHelpers.menuBarChildAttributes(
+                    for: child, includingRole: host.bundleIdentifier == ZeroFrameStatusItem.bundleID
+                )
                 var innerAttributes = [AXHelpers.MenuBarChildAttributes]()
                 for inner in attributes.children {
                     guard canContinue(until: deadline),
                           visited + innerAttributes.count + 1 < maxElementsVisited else { break }
                     try? inner.setMessagingTimeout(messagingTimeout)
                     innerAttributes.append(AXHelpers.descendantAttributes(for: inner, includingChildren: true))
+                }
+                if ZeroFrameStatusItem.matches(
+                    bundleIdentifier: host.bundleIdentifier,
+                    role: attributes.role,
+                    frame: attributes.frame,
+                    childCount: children.count
+                ) {
+                    let frame = ZeroFrameStatusItem.frame(
+                        ownerPID: pid,
+                        maximumHeight: itemHeightCeiling,
+                        entries: AXPrimitives.menuBarAgentWindowEntries()
+                    )
+                    let identity = identityTitle(namespace: namespace, attributes: attributes, descendants: innerAttributes) ?? "Item-0"
+                    results.append(Entry(ownerPID: pid, itemIndex: itemIndex, identityTitle: identity, frame: frame))
+                    visited += 1
+                    continue
                 }
                 let identity = rootIdentityTitle(
                     namespace: namespace,

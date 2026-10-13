@@ -104,9 +104,21 @@ enum AXReader {
                     completed = false
                     break
                 }
-                guard let reported = AXPrimitives.frame(of: child), !reported.isNull, !reported.isEmpty else { continue }
-                guard let frame = AXPrimitives.itemFrame(reported, maximumHeight: maximumItemHeight) else { continue }
-                if let displayBounds, !AXPrimitives.frame(frame, isWithin: displayBounds) {
+                let role = AXPrimitives.stringAttribute(child, kAXRoleAttribute)
+                let reported = AXPrimitives.frame(of: child)
+                let isZeroFrameItem = ZeroFrameStatusItem.matches(
+                    bundleIdentifier: app.bundleIdentifier, role: role, frame: reported, childCount: children.count
+                )
+                guard isZeroFrameItem || (reported.map { !$0.isNull && !$0.isEmpty } ?? false) else { continue }
+                guard let frame = AXPrimitives.inventoryItemFrame(
+                    reported,
+                    bundleIdentifier: app.bundleIdentifier,
+                    role: role,
+                    childCount: children.count,
+                    ownerPID: app.processIdentifier,
+                    maximumHeight: maximumItemHeight
+                ) else { continue }
+                if !frame.isEmpty, let displayBounds, !AXPrimitives.frame(frame, isWithin: displayBounds) {
                     continue
                 }
 

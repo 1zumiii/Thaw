@@ -648,7 +648,7 @@ private struct LayoutSuggestionCards: View {
         itemManager.managedItems(for: .visible)
     }
 
-    // Hints suggest improvements, not failures; closing means "Not now" and suppresses them for a month.
+    /// Hints suggest improvements, not failures; closing means "Not now" and suppresses them for a month.
     var body: some View {
         // swiftlint:disable:next redundant_discardable_let
         let _ = dismissals
@@ -667,7 +667,7 @@ private struct LayoutSuggestionCards: View {
         if littleSnitchItemIsMissing, !LayoutSuggestionDismissal.isQuiet(.littleSnitchScriptingAccess) {
             ThawFirstRunHint(
                 systemImage: "exclamationmark.triangle",
-                "Little Snitch is running, but \(Constants.displayName) can’t see its menu bar icon. In Little Snitch’s settings, under Security, turn on “Allow GUI Scripting access to Little Snitch.”",
+                "Little Snitch is running, but \(Constants.displayName) can’t read its menu bar item. Check “Allow GUI Scripting access to Little Snitch” in Little Snitch’s Security settings. If it is already on, the item may be unavailable through Accessibility; try restarting Little Snitch and then this app.",
                 actionTitle: "Open Little Snitch",
                 action: openLittleSnitch,
                 onDismiss: { dismiss(.littleSnitchScriptingAccess) }

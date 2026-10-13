@@ -116,6 +116,9 @@ extension MenuBarItemManager {
         // macOS 27 the refreshed frame is stated in one display's space, so it
         // is rebased onto the bar under the cursor before the warp below.
         let resolvedBounds = try await getCurrentBounds(for: item)
+        guard !resolvedBounds.isEmpty, !resolvedBounds.isNull else {
+            throw EventError.missingItemBounds(item)
+        }
         let clickPoint = Self.clickPoint(for: resolvedBounds)
         let restoreLocation = try getMouseLocation()
         let source = try getEventSource()

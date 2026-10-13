@@ -161,9 +161,19 @@ nonisolated enum MenuBarItemAXProvider {
                 }
                 // One message for all five attributes costs the same as the
                 // frame alone.
-                let attributes = AXHelpers.menuBarChildAttributes(for: child, includingRole: namespace == .menuBarAgent)
+                let attributes = AXHelpers.menuBarChildAttributes(
+                    for: child,
+                    includingRole: namespace == .menuBarAgent || runningApp.bundleIdentifier == ZeroFrameStatusItem.bundleID
+                )
                 // Skip incidental children (open popovers / panels).
-                guard let frame = Self.itemFrame(attributes.frame, maximumHeight: itemHeightCeiling) else {
+                guard let frame = AXPrimitives.inventoryItemFrame(
+                    attributes.frame,
+                    bundleIdentifier: runningApp.bundleIdentifier,
+                    role: attributes.role,
+                    childCount: children.count,
+                    ownerPID: runningApp.processIdentifier,
+                    maximumHeight: itemHeightCeiling
+                ) else {
                     continue
                 }
                 // No per-display filter: macOS 27 renders one status-item set on
@@ -549,7 +559,10 @@ nonisolated enum MenuBarItemAXProvider {
         let itemHeightCeiling = maxItemHeight(menuBarHeight: NSScreen.tallestCachedMenuBarHeight)
 
         for (childIndex, child) in children.enumerated() {
-            let attributes = AXHelpers.menuBarChildAttributes(for: child, includingRole: namespace == .menuBarAgent)
+            let attributes = AXHelpers.menuBarChildAttributes(
+                for: child,
+                includingRole: namespace == .menuBarAgent || runningApp.bundleIdentifier == ZeroFrameStatusItem.bundleID
+            )
             let diagnosticIdentity = attributes.identifier?.nonEmpty
                 ?? attributes.accessibilityDescription?.nonEmpty
                 ?? "child-\(childIndex)"
@@ -570,7 +583,14 @@ nonisolated enum MenuBarItemAXProvider {
                         "descendants=\(descendantFrames.map { NSStringFromRect($0) })"
                 )
             }
-            guard let frame = Self.itemFrame(attributes.frame, maximumHeight: itemHeightCeiling) else {
+            guard let frame = AXPrimitives.inventoryItemFrame(
+                attributes.frame,
+                bundleIdentifier: runningApp.bundleIdentifier,
+                role: attributes.role,
+                childCount: children.count,
+                ownerPID: runningApp.processIdentifier,
+                maximumHeight: itemHeightCeiling
+            ) else {
                 continue
             }
             // Dormant: the live caller passes no bounds. Don't use it to narrow
@@ -1176,7 +1196,7 @@ nonisolated enum MenuBarItemAXProvider {
                     sourcePID: entry.ownerPID,
                     bounds: entry.bounds,
                     title: entry.displayTitle,
-                    isOnScreen: true
+                    isOnScreen: !entry.bounds.isEmpty
                 )
             )
         }

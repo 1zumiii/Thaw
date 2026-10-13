@@ -19,7 +19,7 @@ nonisolated enum LayoutSuggestions {
         }
     }
 
-    /// Little Snitch's menu bar agent. Its icon is only enumerable while Little Snitch allows GUI scripting.
+    /// Little Snitch's menu bar agent. GUI scripting alone does not guarantee readable item geometry.
     static let littleSnitchAgentBundleID = "at.obdev.littlesnitch.agent"
 
     /// The app whose settings hold the GUI Scripting switch.
@@ -29,7 +29,7 @@ nonisolated enum LayoutSuggestions {
     /// An empty inventory proves nothing, so it never reports.
     static func littleSnitchItemIsMissing(runningBundleIDs: Set<String>, items: [MenuBarItem]) -> Bool {
         guard runningBundleIDs.contains(littleSnitchAgentBundleID), !items.isEmpty else { return false }
-        return !items.contains { "\($0.tag.namespace)" == littleSnitchAgentBundleID }
+        return !items.contains { littleSnitchAgentBundleID == "\($0.tag.namespace)" }
     }
 
     /// A short, locale-formatted list of names, with "and N more" past three.

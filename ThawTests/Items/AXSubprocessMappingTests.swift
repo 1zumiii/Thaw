@@ -68,4 +68,23 @@ struct AXSubprocessMappingTests {
         #expect(items[1].tag.title == "Item-1")
         #expect(items[0].windowID != items[1].windowID)
     }
+
+    @Test("Little Snitch keeps its identity when hidden without inventing an on-screen frame")
+    func zeroFrameLittleSnitchRemainsInInventory() {
+        let visible = observation(bundleID: ZeroFrameStatusItem.bundleID, x: 1200)
+        let hidden = AXItemObservation(
+            bundleID: ZeroFrameStatusItem.bundleID, processName: nil, ownerPID: 100,
+            identifier: nil, accessibilityDescription: nil, title: nil, help: nil,
+            frame: .zero, isOverflowControl: false
+        )
+        let shownItems = MenuBarItemAXProvider.items(fromSubprocess: [visible])
+        let hiddenItems = MenuBarItemAXProvider.items(fromSubprocess: [hidden])
+        #expect(shownItems.count == 1)
+        #expect(hiddenItems.count == 1)
+        #expect(shownItems.first?.tag == hiddenItems.first?.tag)
+        #expect(shownItems.first?.windowID == hiddenItems.first?.windowID)
+        #expect(shownItems.first?.isOnScreen == true)
+        #expect(hiddenItems.first?.isOnScreen == false)
+        #expect(hiddenItems.first?.bounds == .zero)
+    }
 }
