@@ -8,13 +8,13 @@
 import ApplicationServices
 import CoreGraphics
 
-/// Little Snitch 6.5 can publish a real AXMenuBarItem whose frame is zero.
+/// Little Snitch 6.5 can publish a real AXMenuBarItem with no frame attribute or a zero frame.
 /// Its MenuBarAgent wrapper still carries geometry while the icon is drawn.
 public enum ZeroFrameStatusItem {
     public static let bundleID = "at.obdev.littlesnitch.agent"
 
     public static func matches(bundleIdentifier: String?, role: String?, frame: CGRect?, childCount: Int) -> Bool {
-        bundleIdentifier == bundleID && role == kAXMenuBarItemRole && frame == .zero && childCount == 1
+        bundleIdentifier == bundleID && role == kAXMenuBarItemRole && (frame == nil || frame == .zero) && childCount == 1
     }
 
     /// No positional guess when an owner has several seats or its seat cannot be read.
@@ -32,7 +32,7 @@ public enum ZeroFrameStatusItem {
 
 public extension AXPrimitives {
     /// Normal AX items retain the usual panel/height filter. Only the verified
-    /// single, zero-sized Little Snitch status item may use its host's bounds.
+    /// single, frameless Little Snitch status item may use its host's bounds.
     static func inventoryItemFrame(
         _ reported: CGRect?,
         bundleIdentifier: String?,

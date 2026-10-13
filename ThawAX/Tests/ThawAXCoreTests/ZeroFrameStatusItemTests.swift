@@ -46,10 +46,16 @@ struct ZeroFrameStatusItemTests {
         #expect(resolve(entries: [.init(ownerPID: 42, frame: seat), .init(ownerPID: 42, frame: seat)]) == .zero)
     }
 
-    @Test func refusesUnknownAppsMissingFramesAndNonStatusRoots() {
+    @Test func missingFrameAttributeStillRecoversTheProvenStatusItem() {
+        #expect(resolve(reported: nil, entries: [.init(ownerPID: 42, frame: seat)]) == seat)
+        #expect(resolve(reported: nil) == .zero)
+        #expect(resolve(bundle: "com.example.App", reported: nil) == nil)
+        #expect(resolve(role: nil, reported: nil) == nil)
+    }
+
+    @Test func refusesUnknownAppsAndNonStatusRoots() {
         #expect(resolve(bundle: "com.example.App") == nil)
         #expect(resolve(role: kAXMenuRole) == nil)
-        #expect(resolve(reported: nil) == nil)
         #expect(resolve(childCount: 2) == nil)
         #expect(resolve(childCount: 0) == nil)
     }
