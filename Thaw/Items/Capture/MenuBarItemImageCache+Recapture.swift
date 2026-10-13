@@ -851,12 +851,29 @@ extension MenuBarItemImageCache {
         return true
     }
 
-    /// Briefly reveals concealed macOS 27 sections so their live glyphs can be
-    /// captured before the assertion hides them again.
+    /// Loads cached glyphs without changing menu-bar visibility. Revealing
+    /// hidden items for new pixels requires an explicit preview refresh.
     @MainActor
     func prewarmConcealedImages(
         sections requestedSections: [MenuBarSection.Name],
-        onlyMissingImages: Bool = true
+        onlyMissingImages: Bool = true,
+        allowTemporaryReveal: Bool = false
+    ) async {
+        loadFromDiskIfNeeded()
+        // Opening a bar or Layout must not flash hidden items on the real bar.
+        // Missing previews already have an app-icon fallback in both surfaces.
+        guard allowTemporaryReveal else { return }
+
+        await prewarmWithTemporaryReveal(
+            sections: requestedSections,
+            onlyMissingImages: onlyMissingImages
+        )
+    }
+
+    @MainActor
+    private func prewarmWithTemporaryReveal(
+        sections requestedSections: [MenuBarSection.Name],
+        onlyMissingImages: Bool
     ) async {
         // Before the failure reset and the reveal: a locked pass must not toggle
         // the lock screen's bar or clear strikes it did not earn back.
@@ -1193,7 +1210,8 @@ extension MenuBarItemImageCache {
             guard let self else { return }
             await self.prewarmConcealedImages(
                 sections: [.hidden, .alwaysHidden],
-                onlyMissingImages: true
+                onlyMissingImages: true,
+                allowTemporaryReveal: true
             )
             guard !Task.isCancelled else { return }
             await self.recaptureNow(sections: MenuBarSection.Name.allCases)
