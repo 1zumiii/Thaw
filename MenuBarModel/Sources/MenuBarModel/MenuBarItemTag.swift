@@ -12,6 +12,20 @@ import Synchronization
 
 // MARK: - MenuBarItemTag
 
+/// Regex literals are re-parsed on every evaluation, so the ones used on
+/// repeatedly called identity paths are compiled once here. A compiled regex
+/// is immutable, so sharing it across threads is safe despite lacking Sendable.
+private enum Patterns {
+    nonisolated(unsafe) static let genericItem = /Item-\d+/
+    nonisolated(unsafe) static let appKitPlaceholder = /_NS:\d+/
+    nonisolated(unsafe) static let appKitPlaceholderOptionalInstance = /_NS:\d+(?::\d+)?/
+    nonisolated(unsafe) static let appKitPlaceholderWithInstance = /(_NS:\d+)(?::(\d+))?/
+    nonisolated(unsafe) static let trailingClock = /\d{1,2}:\d{2}(?::\d{2})?$/
+    nonisolated(unsafe) static let number = /[-+]?\d+(?:[.,]\d+)?/
+    nonisolated(unsafe) static let byteRate = /#\s*[KMGTPE]?[Bb]\/s/
+    nonisolated(unsafe) static let byteCount = /#\s*[KMGTPE]?[Bb]/
+}
+
 /// An identifier for a menu bar item.
 public struct MenuBarItemTag: Hashable, CustomStringConvertible, Sendable, Codable {
     /// Shared classification for hiding, section assignment, and layout caching.
@@ -446,7 +460,7 @@ public struct MenuBarItemTag: Hashable, CustomStringConvertible, Sendable, Codab
     /// place that shape is spelled out.
     public static func isGenericItemTitle(_ title: String?) -> Bool {
         guard let title else { return false }
-        return title.wholeMatch(of: /Item-\d+/) != nil
+        return title.wholeMatch(of: Patterns.genericItem) != nil
     }
 
     /// Generic hosting-process identity (such as a Live Activity) with the pattern <hostingProcess>:Item-\d+.
@@ -594,7 +608,7 @@ public struct MenuBarItemTag: Hashable, CustomStringConvertible, Sendable, Codab
     /// the live-title registry so AX attribute precedence remains unchanged.
     private static func migratedAppKitPlaceholderTitle(bundleID: String, title: String) -> String? {
         guard bundleID == "com.knollsoft.Rectangle",
-              title.wholeMatch(of: /_NS:\d+/) != nil
+              title.wholeMatch(of: Patterns.appKitPlaceholder) != nil
         else { return nil }
         return "Item-0"
     }
@@ -609,7 +623,7 @@ public struct MenuBarItemTag: Hashable, CustomStringConvertible, Sendable, Codab
         let prefix = "\(bundleID):"
         let suffix = String(identifier[identifier.index(after: separator)...])
         // The first number belongs to AppKit's title, not to our instance index.
-        if let match = suffix.wholeMatch(of: /(_NS:\d+)(?::(\d+))?/),
+        if let match = suffix.wholeMatch(of: Patterns.appKitPlaceholderWithInstance),
            let title = migratedAppKitPlaceholderTitle(bundleID: bundleID, title: String(match.1))
         {
             let instance = match.2.map { ":\($0)" } ?? ""
@@ -621,7 +635,7 @@ public struct MenuBarItemTag: Hashable, CustomStringConvertible, Sendable, Codab
 
         // A clock's trailing minutes are not an instance index; splitting them would churn identity every minute.
         // Distinguish times by digits before the colon and two digits after it.
-        if !suffix.contains(/\d{1,2}:\d{2}(?::\d{2})?$/),
+        if !suffix.contains(Patterns.trailingClock),
            let separator = suffix.lastIndex(of: ":")
         {
             let title = String(suffix[..<separator])
@@ -644,7 +658,7 @@ public struct MenuBarItemTag: Hashable, CustomStringConvertible, Sendable, Codab
             && identifiers.contains { title(of: $0)?.hasPrefix("OneDrive \u{2014} ") == true }
         return identifiers.filter { identifier in
             guard let title = title(of: identifier) else { return true }
-            if title.wholeMatch(of: /_NS:\d+(?::\d+)?/) != nil {
+            if title.wholeMatch(of: Patterns.appKitPlaceholderOptionalInstance) != nil {
                 return false
             }
             return !(hasOneDriveAccountTitle && title == "OneDrive")
@@ -666,7 +680,7 @@ public struct MenuBarItemTag: Hashable, CustomStringConvertible, Sendable, Codab
     /// - Note: A bare clock ("15:41") has no ": " and canonicalizes to "#:#".
     public static func canonicalIStatMetricTitle(_ raw: String) -> String {
         // An untitled extra's Item-N is a stable identity that keys the position store, not a reading.
-        if raw.wholeMatch(of: /Item-\d+/) != nil {
+        if raw.wholeMatch(of: Patterns.genericItem) != nil {
             return raw
         }
         if let separator = raw.range(of: ": ") {
@@ -676,9 +690,9 @@ public struct MenuBarItemTag: Hashable, CustomStringConvertible, Sendable, Codab
             }
         }
         return raw
-            .replacing(/[-+]?\d+(?:[.,]\d+)?/, with: "#")
-            .replacing(/#\s*[KMGTPE]?[Bb]\/s/, with: "# B/s")
-            .replacing(/#\s*[KMGTPE]?[Bb]/, with: "# B")
+            .replacing(Patterns.number, with: "#")
+            .replacing(Patterns.byteRate, with: "# B/s")
+            .replacing(Patterns.byteCount, with: "# B")
     }
 
     /// Keeps the name after ": " without matching localized countdown words; identity changes only when the meeting changes.
