@@ -12,8 +12,8 @@ if [[ -n "$(git status --porcelain)" ]]; then
     exit 1
 fi
 case "$(git remote get-url origin)" in
-    https://github.com/1zumiii/Thaw.git|git@github.com:1zumiii/Thaw.git) ;;
-    *) echo 'origin must point to 1zumiii/Thaw.' >&2; exit 1 ;;
+    https://github.com/1zumiii/Thaw-Custom.git|git@github.com:1zumiii/Thaw-Custom.git) ;;
+    *) echo 'origin must point to 1zumiii/Thaw-Custom.' >&2; exit 1 ;;
 esac
 if ! git remote get-url upstream >/dev/null 2>&1; then
     git remote add upstream https://github.com/thaw-app/Thaw.git
