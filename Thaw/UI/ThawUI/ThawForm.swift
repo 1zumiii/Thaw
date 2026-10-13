@@ -17,10 +17,17 @@ struct ThawForm<Content: View>: View {
         /// The pane's full width, for inherently wide content such as the
         /// layout editor's drag rows.
         case full
+
+        /// Quantize the gutter without storing geometry in view state.
+        func gutter(for width: CGFloat) -> CGFloat {
+            guard self == .column else { return 0 }
+            let overflow = width - (SettingsDetailLayout.titleHorizontalInset * 2)
+                - SettingsDetailLayout.columnMaxWidth
+            return max(0, (overflow / 16).rounded(.down) * 8)
+        }
     }
 
     @Environment(\.settingsPaneTitle) private var settingsPaneTitle
-    @State private var formWidth: CGFloat = 0
 
     private let readingWidth: ReadingWidth
     private let content: Content
@@ -45,51 +52,22 @@ struct ThawForm<Content: View>: View {
                     .padding(.bottom, 12)
             }
 
-            Form {
-                content
-            }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .scrollEdgeEffectStyle(.soft, for: .top)
-            .scrollEdgeEffectStyle(.soft, for: .bottom)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: ThawFormWidthKey.self,
-                        value: proxy.size.width
-                    )
+            // The viewport supplies its width in the same layout pass. A
+            // background preference followed by a State write scheduled an
+            // extra view update even when the gutter stayed unchanged.
+            GeometryReader { proxy in
+                Form {
+                    content
                 }
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .scrollEdgeEffectHidden()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentMargins(.horizontal, readingWidth.gutter(for: proxy.size.width), for: .scrollContent)
+                .contentMargins(.vertical, 8, for: .scrollContent)
             }
-            .onPreferenceChange(ThawFormWidthKey.self) { width in
-                formWidth = width
-            }
-            .contentMargins(.horizontal, readingGutter, for: .scrollContent)
-            .contentMargins(.vertical, 8, for: .scrollContent)
         }
         .focusSection()
         .accessibilityElement(children: .contain)
-    }
-
-    /// Extra inset so grouped cards stay near SettingsDetailLayout.columnMaxWidth
-    /// on wide windows without pinning the scrollbar to that column. Full-width
-    /// forms take none.
-    private var readingGutter: CGFloat {
-        guard readingWidth == .column else { return 0 }
-        let available = formWidth - (SettingsDetailLayout.titleHorizontalInset * 2)
-        let overflow = available - SettingsDetailLayout.columnMaxWidth
-        guard overflow > 0 else {
-            return 0
-        }
-        // Quantized to 8pt so a live resize does not relayout the whole form
-        // on every pixel.
-        return (overflow / 2 / 8).rounded(.down) * 8
-    }
-}
-
-private struct ThawFormWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }

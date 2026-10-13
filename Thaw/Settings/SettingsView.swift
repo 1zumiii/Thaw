@@ -160,9 +160,6 @@ struct SettingsView: View {
                 // Fill the detail column so the Form's scrollbar sits on the
                 // window/detail trailing edge, not on a 680pt content column.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                // Content fades under the glass toolbar instead of stopping at
-                // a hard band.
-                .scrollEdgeEffectStyle(.soft, for: .top)
         }
         .searchable(
             text: $searchModel.searchText,
@@ -192,28 +189,15 @@ struct SettingsView: View {
         if isSearching {
             SettingsSearchResults(navigationState: navigationState)
                 .id("search")
-                .transition(paneTransition)
+                .transition(.identity)
         } else {
             settingsPane
                 .id(navigationState.settingsNavigationIdentifier)
-                .transition(paneTransition)
+                .transition(.identity)
                 // The toolbar names the pane; the pane's own title slot stays
                 // empty so nothing prints it twice.
                 .environment(\.settingsPaneTitle, nil)
         }
-    }
-
-    private var paneTransition: AnyTransition {
-        // Insertion-only: cross-fading two full panes doubles the glass and
-        // material layers WindowServer composites for the whole fade, which
-        // reads as pane-switch lag. Removing the old pane instantly keeps at
-        // most one pane's worth of glass on screen.
-        reduceMotion
-            ? .identity
-            : .asymmetric(
-                insertion: .opacity.animation(ThawMotion.pane),
-                removal: .identity
-            )
     }
 
     /// Brings the window to the size the incoming layout wants.
@@ -701,7 +685,7 @@ private struct SettingsSidebarPaneList: View {
         .environment(\.sidebarRowSize, .medium)
         .scrollContentBackground(.hidden)
         .contentMargins(.horizontal, ThawSpacing.base, for: .scrollContent)
-        .scrollEdgeEffectStyle(.soft, for: .top)
+        .scrollEdgeEffectHidden()
     }
 }
 
