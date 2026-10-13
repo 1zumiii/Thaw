@@ -53793,6 +53793,16 @@
           }
         }
       }
+    },
+    "Automatic updates are disabled for this custom build." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此自定义版本已禁用自动更新。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

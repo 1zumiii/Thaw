@@ -69,6 +69,7 @@ final class UpdatesManager: NSObject {
             return Self.storedUpdateChannel()
         }
         set {
+            guard Constants.supportsSparkleUpdates else { return }
             withMutation(keyPath: \.updateChannel) {
                 UserDefaults.standard.set(newValue.rawValue, forKey: UpdateChannel.defaultsKey)
             }
@@ -106,6 +107,7 @@ final class UpdatesManager: NSObject {
     /// Sparkle-backed check/download preferences need explicit access and withMutation calls for Observation tracking.
     var automaticallyChecksForUpdates: Bool {
         get {
+            guard Constants.supportsSparkleUpdates else { return false }
             access(keyPath: \.automaticallyChecksForUpdates)
             return updater.automaticallyChecksForUpdates
         }
@@ -124,6 +126,7 @@ final class UpdatesManager: NSObject {
 
     var automaticallyDownloadsUpdates: Bool {
         get {
+            guard Constants.supportsSparkleUpdates else { return false }
             access(keyPath: \.automaticallyDownloadsUpdates)
             return updater.automaticallyDownloadsUpdates
         }
@@ -142,6 +145,7 @@ final class UpdatesManager: NSObject {
 
     func performSetup(with appState: AppState) {
         self.appState = appState
+        guard Constants.supportsSparkleUpdates else { return }
         _ = updaterController
         // Scrub SUFeedURL defaults that could redirect checks away from Info.plist; the delegate also ignores them.
         updater.clearFeedURLFromUserDefaults()
@@ -206,6 +210,7 @@ extension UpdatesManager: SPUUpdaterDelegate {
 
     /// Pin the feed to Info.plist so writes to SUFeedURL defaults cannot redirect update checks to a foreign server.
     func feedURLString(for _: SPUUpdater) -> String? {
+        guard Constants.supportsSparkleUpdates else { return nil }
         #if DEBUG
             // Lets a Debug build rehearse the update flow against a local
             // appcast. Release builds never read it.

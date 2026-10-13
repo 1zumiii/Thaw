@@ -32,7 +32,11 @@ struct AboutSettingsPane: View {
         ScrollView {
             VStack(spacing: 24) {
                 identity
-                updates
+                if Constants.supportsSparkleUpdates {
+                    updates
+                } else {
+                    Text("Automatic updates are disabled for this custom build.").font(.callout).foregroundStyle(ThawInk.supporting)
+                }
                 actions
                 footer
             }
