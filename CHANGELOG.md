@@ -7,9 +7,11 @@ The `release.yml` workflow reads the section matching the release tag
 (`## [tag]`) and uses it as the release notes for both the GitHub Release
 and the Sparkle appcast, unless overridden with the `release_notes` input.
 
-## [3.0.0-alpha.9] - 2026-10-12
+## [3.0.0-alpha.9] - 2026-10-14
 
 **macOS 27 only · Build 114**
+
+Hey, we have a website! The docs, the changelog and the roadmap are at [getthaw.app](https://www.getthaw.app).
 
 This build fixes bugs and tidies Settings. Features stay frozen for one more release.
 
@@ -71,6 +73,7 @@ After you update:
 
 ### Known issues
 
+- **The Game Mode indicator can't be hidden.** The alpha.8 notes said it could be moved and hidden, but it stays on the menu bar.
 - **Home and other pinned Control Center items leave the menu bar while Hidden is closed**, if you use Standard or Everything. Layout marks them. Thaw cannot keep them on the bar.
 - **Siri does not run Thaw's actions when you ask by voice.** On macOS 27 it answers with a description or says it cannot search in Thaw. The same actions work from Shortcuts and Spotlight.
 - **Clicks in Settings land below the control on some Macs.** Reported by @n0tishaan in [#1265](https://github.com/thaw-app/Thaw/issues/1265) and @Mudflapper in [#1244](https://github.com/thaw-app/Thaw/issues/1244). We could not reproduce it. If it happens to you, [send us a log](https://www.getthaw.app/docs/thaw/frequent-issues#before-you-file-a-bug) from this build.
