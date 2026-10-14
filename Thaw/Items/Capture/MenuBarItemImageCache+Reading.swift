@@ -750,7 +750,7 @@ extension MenuBarItemImageCache {
     }
 
     @MainActor
-    private func captureDemand() -> CaptureDemand {
+    func captureDemand() -> CaptureDemand {
         let nav = makeNavigationStateSnapshot()
         return CaptureDemand(
             usesAppIcons: configuration.alwaysUseAppIconForMenuBarItems,

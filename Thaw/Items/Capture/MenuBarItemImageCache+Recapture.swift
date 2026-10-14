@@ -707,14 +707,21 @@ extension MenuBarItemImageCache {
         appState: AppState,
         sources: RevealCaptureSources
     ) async {
+        var revealedAny = false
+        defer {
+            if revealedAny {
+                // A new owner can appear while the assertion is held. Reapply
+                // after all temporary exemptions have been removed.
+                controller.refresh(forceRestrictionPulse: false, forceReapply: true)
+            }
+        }
         for batch in batches {
             // A reveal during a move reflows the bar under the drag.
             await moveActivity?.waitUntilIdle()
             guard !Task.isCancelled, !skipCaptureWhileScreenLocked("revealing capture batch") else { return }
 
-            for item in batch {
-                controller.revealItemTemporarily(item.uniqueIdentifier)
-            }
+            revealedAny = revealedAny || !batch.isEmpty
+            beginPreviewCapture(batch, controller: controller)
             defer {
                 for item in batch {
                     controller.concealTemporarilyRevealedItem(item.uniqueIdentifier)
@@ -777,6 +784,14 @@ extension MenuBarItemImageCache {
                 missPolicy: missPolicy,
                 appState: appState
             ) else { return }
+        }
+    }
+
+    @MainActor
+    private func beginPreviewCapture(_ batch: [MenuBarItem], controller: any MenuBarSectionControlling) {
+        for item in batch {
+            initialPreviewCaptureAttempts.insert(item.tag.tagIdentifier)
+            controller.revealItemTemporarily(item.uniqueIdentifier)
         }
     }
 
@@ -851,8 +866,8 @@ extension MenuBarItemImageCache {
         return true
     }
 
-    /// Loads cached glyphs without changing menu-bar visibility. Revealing
-    /// hidden items for new pixels requires an explicit preview refresh.
+    /// Captures a missing glyph once, then reuses its memory/disk cache.
+    /// Explicit refreshes may retry failed items; normal opens may not.
     @MainActor
     func prewarmConcealedImages(
         sections requestedSections: [MenuBarSection.Name],
@@ -860,20 +875,34 @@ extension MenuBarItemImageCache {
         allowTemporaryReveal: Bool = false
     ) async {
         loadFromDiskIfNeeded()
-        // Opening a bar or Layout must not flash hidden items on the real bar.
-        // Missing previews already have an app-icon fallback in both surfaces.
-        guard allowTemporaryReveal else { return }
+        // Wait for the saved glyphs before deciding anything is missing.
+        await diskLoadTask?.value
+        guard !Task.isCancelled else { return }
+        if !allowTemporaryReveal {
+            guard let appState,
+                  requestedSections.contains(where: { section in
+                      section != .visible && appState.itemManager.itemCache[section].contains { item in
+                          Self.shouldCaptureInitialPreview(
+                              cachedImage: image(for: item.tag),
+                              wasAttempted: initialPreviewCaptureAttempts.contains(item.tag.tagIdentifier)
+                          )
+                      }
+                  })
+            else { return }
+        }
 
         await prewarmWithTemporaryReveal(
             sections: requestedSections,
-            onlyMissingImages: onlyMissingImages
+            onlyMissingImages: onlyMissingImages || !allowTemporaryReveal,
+            retryFailures: allowTemporaryReveal
         )
     }
 
     @MainActor
     private func prewarmWithTemporaryReveal(
         sections requestedSections: [MenuBarSection.Name],
-        onlyMissingImages: Bool
+        onlyMissingImages: Bool,
+        retryFailures: Bool
     ) async {
         // Before the failure reset and the reveal: a locked pass must not toggle
         // the lock screen's bar or clear strikes it did not earn back.
@@ -901,7 +930,7 @@ extension MenuBarItemImageCache {
         // stop background passes hammering an item that keeps failing; left in
         // force here it would keep a blacklisted item out of this reveal, so it
         // could only ever be captured by the user clicking it.
-        if let itemManager = appState?.itemManager {
+        if retryFailures, let itemManager = appState?.itemManager {
             let tags = sections.reduce(into: Set<MenuBarItemTag>()) { result, section in
                 result.formUnion(itemManager.itemCache[section].map(\.tag))
             }
@@ -925,7 +954,9 @@ extension MenuBarItemImageCache {
             guard let appState else { break }
             let controller = appState.menuBarManager.sectionController
 
-            let sectionItems = appState.itemManager.itemCache[section]
+            let sectionItems = Self.itemsNeedingCapture(
+                appState.itemManager.itemCache[section], demand: captureDemand()
+            )
             guard !sectionItems.isEmpty else { continue }
 
             let displayID = appState.itemManager.itemDisplayID
@@ -933,21 +964,12 @@ extension MenuBarItemImageCache {
                 ?? CGMainDisplayID()
             let isNativeOverflowActive = controller.isNativeOverflowActive(on: displayID)
             let itemsToCapture = sectionItems.filter { item in
-                // Thaw Bar Only items draw their app icon; revealing them
-                // to capture would flash them on the bar.
-                guard !appState.itemManager.isThawBarOnly(item) else {
-                    return false
-                }
-                // Native notch overflow remains in force when Thaw removes
-                // an item from its own concealment assertion. A prewarm in
-                // that state can only capture the system overflow chevron,
-                // never the item's real glyph.
-                guard !isNativeOverflowActive else {
-                    return false
-                }
-                return !onlyMissingImages || Self.prewarmNeedsCapture(
-                    cachedImage: image(for: item.tag),
-                    wouldAttemptCapture: wouldAttemptCapture(of: item)
+                canPrewarmCapture(
+                    item,
+                    appState: appState,
+                    isNativeOverflowActive: isNativeOverflowActive,
+                    onlyMissingImages: onlyMissingImages,
+                    retryFailures: retryFailures
                 )
             }
             guard !itemsToCapture.isEmpty else { continue }
@@ -982,6 +1004,25 @@ extension MenuBarItemImageCache {
         // would otherwise pay that cost once per section back-to-back for the
         // same end state.
         saveToDisk()
+    }
+
+    @MainActor
+    private func canPrewarmCapture(
+        _ item: MenuBarItem,
+        appState: AppState,
+        isNativeOverflowActive: Bool,
+        onlyMissingImages: Bool,
+        retryFailures: Bool
+    ) -> Bool {
+        // Overflow pixels and Thaw Bar Only items cannot yield a real glyph.
+        guard !isNativeOverflowActive, !appState.itemManager.isThawBarOnly(item) else { return false }
+        guard retryFailures || Self.shouldCaptureInitialPreview(
+            cachedImage: image(for: item.tag),
+            wasAttempted: initialPreviewCaptureAttempts.contains(item.tag.tagIdentifier)
+        ) else { return false }
+        return !onlyMissingImages || Self.prewarmNeedsCapture(
+            cachedImage: image(for: item.tag), wouldAttemptCapture: wouldAttemptCapture(of: item)
+        )
     }
 
     /// Waits until no other concealed-section prewarm is running, then marks
@@ -1181,6 +1222,7 @@ extension MenuBarItemImageCache {
     @MainActor
     func clearAll() {
         removeAllCaptures()
+        initialPreviewCaptureAttempts.removeAll()
         accessTimestamps.removeAll()
         accessCounter = 0
         failedCapturesLock.withLock { $0.removeAll() }
@@ -1210,7 +1252,7 @@ extension MenuBarItemImageCache {
             guard let self else { return }
             await self.prewarmConcealedImages(
                 sections: [.hidden, .alwaysHidden],
-                onlyMissingImages: true,
+                onlyMissingImages: false,
                 allowTemporaryReveal: true
             )
             guard !Task.isCancelled else { return }

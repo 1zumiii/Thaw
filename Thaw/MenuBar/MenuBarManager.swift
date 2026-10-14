@@ -296,6 +296,7 @@ final class MenuBarManager {
         systemExtraTakeover.recoverPreviousSession()
         // Recovery and overflow need notch coverage kept current across display changes.
         MenuBarNotchGeometry.refresh()
+        WeChatIdentityMigration.apply()
         let controller = RuntimeSectionController(
             context: RuntimeSectionContextAdapter(appState: appState)
         )

@@ -21,6 +21,19 @@ struct VolatileTitleTests {
 
     // MARK: Bundle matching
 
+    @Test("WeChat counts and its unnamed fallback identify the same item")
+    func weChatUnreadCountIsNotAnIdentity() {
+        let namespace = MenuBarItemTag.Namespace.string("com.tencent.xinWeChat")
+        let identifiers = ["Item-0", " 1", " 2", " 8", "", "WeChat"].map {
+            MenuBarItemTag(namespace: namespace, title: $0).tagIdentifier
+        }
+        #expect(Set(identifiers) == ["com.tencent.xinWeChat:Item"])
+        #expect(MenuBarItemTag.canonicalPersistentIdentifiers([
+            "com.tencent.xinWeChat: 2", "com.tencent.xinWeChat:Item-0", "com.tencent.xinWeChat: 8",
+        ]) == ["com.tencent.xinWeChat:Item"])
+        #expect(!MenuBarItemTag.hasVolatileTitles("com.tencent.xinWeChat.helper"))
+    }
+
     @Test("MacThrottle keeps one identity across temperature ticks and display modes")
     func macThrottleKeepsOneIdentity() {
         let namespace = MenuBarItemTag.Namespace.string("com.macthrottle.app")

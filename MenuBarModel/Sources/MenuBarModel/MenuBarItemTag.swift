@@ -211,8 +211,9 @@ public struct MenuBarItemTag: Hashable, CustomStringConvertible, Sendable, Codab
     /// Whether bundleID belongs to an app whose status-item titles are live
     /// text end to end and therefore cannot serve as identity at all.
     public static func hasVolatileTitles(_ bundleID: String) -> Bool {
-        // Amphetamine's single item alternates between Item-0, ∞ and 𝗧.
-        bundleID == "com.if.Amphetamine" || volatileTitleBundleMatchers.contains { matcher in
+        // WeChat's unread count alternates with its unnamed Item-0 fallback.
+        // Neither transition reaches the learned-title path, which ignores placeholders.
+        bundleID == "com.tencent.xinWeChat" || bundleID == "com.if.Amphetamine" || volatileTitleBundleMatchers.contains { matcher in
             bundleID.hasPrefix(matcher.prefix) && bundleID.hasSuffix(matcher.suffix)
         } || learnedVolatileTitleBundleIDs.withLock { $0.contains(bundleID) }
     }

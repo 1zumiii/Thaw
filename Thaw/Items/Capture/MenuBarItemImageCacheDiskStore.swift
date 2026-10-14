@@ -82,14 +82,14 @@ final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {
 
     /// The per-item TTL ladder.
     ///
-    /// A concealed item gets the stable age: it is too rarely observed to earn
-    /// a class, and an old glyph beats an app icon until the prewarm replaces it.
+    /// Concealed glyphs have no expiry: refreshing them would expose the item.
+    /// Explicit refresh and cache-version changes still replace them.
     nonisolated func diskCacheTTL(
         for volatility: MenuBarItemVolatilityIndex.Volatility?,
         wasConcealed: Bool = false
     ) -> TimeInterval {
         if wasConcealed {
-            return Self.stableCacheAgeSeconds
+            return .infinity
         }
         return switch volatility {
         case .stable: Self.stableCacheAgeSeconds
@@ -429,7 +429,9 @@ final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {
 
             // A file older than the most generous TTL cannot serve anything.
             let age = Date().timeIntervalSince1970 - timestamp
-            if age > Self.stableCacheAgeSeconds {
+            if age > Self.stableCacheAgeSeconds,
+               !imagesDict.values.contains(where: { $0["concealed"] as? Bool == true })
+            {
                 Self.diagLog.debug("Disk cache is \(Int(age))s old, deleting stale cache")
                 try? FileManager.default.removeItem(at: readFile)
                 return nil

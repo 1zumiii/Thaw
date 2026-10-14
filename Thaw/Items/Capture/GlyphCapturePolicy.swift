@@ -11,6 +11,15 @@ import MenuBarModel
 extension MenuBarItemImageCache {
     // MARK: Glyph Trust And Preference
 
+    static nonisolated func shouldCaptureInitialPreview(
+        cachedImage: MenuBarItemGlyphCapture?,
+        wasAttempted: Bool
+    ) -> Bool {
+        guard !wasAttempted else { return false }
+        guard let cachedImage else { return true }
+        return !isTrustedGlyph(cachedImage)
+    }
+
     /// Minimum point width for a crop that is trusted as a real status-item glyph.
     /// Narrower crops usually come from native overflow chevron bleed on macOS 27.
     static nonisolated let minimumTrustedGlyphWidth: CGFloat = 15

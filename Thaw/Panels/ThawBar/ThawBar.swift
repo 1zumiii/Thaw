@@ -433,6 +433,7 @@ final class ThawBarPanel: NSPanel {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             await appState.itemManager.cacheItemsIfNeeded()
+            await appState.itemManager.reapplyEscapedConcealment()
             guard !Task.isCancelled else { return }
             // Prewarm on open as well as per-item so uncaptured glyphs do not leave blank slots.
             if let section = await MainActor.run(body: { self?.currentSection }) {

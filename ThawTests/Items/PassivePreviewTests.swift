@@ -12,7 +12,7 @@ import Testing
 @testable import Thaw
 
 @MainActor
-@Suite("Passive previews do not reveal hidden items")
+@Suite("Passive previews reuse cached glyphs")
 struct PassivePreviewTests {
     @Test("Opening a preview preserves cached images and failed reads without starting capture", arguments: [true, false])
     func openingDoesNotCapture(onlyMissing: Bool) async throws {
@@ -36,6 +36,8 @@ struct PassivePreviewTests {
         context.setFillColor(CGColor(gray: 1, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: 24, height: 24))
         let image = try MenuBarItemGlyphCapture(cgImage: #require(context.makeImage()), scale: 1)
+        #expect(!MenuBarItemImageCache.shouldCaptureInitialPreview(cachedImage: image, wasAttempted: false))
+        #expect(!MenuBarItemImageCache.shouldCaptureInitialPreview(cachedImage: image, wasAttempted: true))
         cache.setCapture(image, for: tag)
         cache.failedCapturesLock.withLock {
             $0[tag] = .init(tag: tag, failureCount: 2, lastFailureTime: .now)
@@ -68,5 +70,11 @@ struct PassivePreviewTests {
         )
 
         #expect(probes.withLock { $0 } == 1)
+    }
+
+    @Test("A missing preview is attempted only once, even after a failed capture")
+    func firstCaptureOnly() {
+        #expect(MenuBarItemImageCache.shouldCaptureInitialPreview(cachedImage: nil, wasAttempted: false))
+        #expect(!MenuBarItemImageCache.shouldCaptureInitialPreview(cachedImage: nil, wasAttempted: true))
     }
 }

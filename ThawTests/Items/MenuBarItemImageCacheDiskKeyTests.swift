@@ -282,7 +282,7 @@ struct MenuBarItemImageCacheDiskKeyTests {
         #expect(store.diskCacheTTL(for: nil) < 60)
         #expect(
             store.diskCacheTTL(for: nil, wasConcealed: true)
-                == MenuBarItemImageCacheDiskStore.stableCacheAgeSeconds
+                == .infinity
         )
     }
 }
