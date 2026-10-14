@@ -104,14 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             currentOnboardingVersion: Constants.currentOnboardingVersion
         )
 
-        // Never show onboarding and What's New together; onboarding already includes release notes.
         if ReducedModeController.shared.isRunning {
             // The reduced mode has no windows of its own and asks for nothing.
         } else if stage != .none {
             appState.openWindow(.permissions)
-        } else {
-            // Upgrade notes appear once per version, only outside the onboarding/permissions path.
-            appState.presentWhatsNewForUpgradeIfNeeded()
         }
     }
 

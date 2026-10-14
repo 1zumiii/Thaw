@@ -315,25 +315,6 @@ final class AppState {
         openWindow(.permissions)
     }
 
-    /// First launches and upgrades without changelog content record the version silently, leaving onboarding to handle new users.
-    /// Record synchronously before the async repository fetch to avoid repeated prompts after failures.
-    func presentWhatsNewForUpgradeIfNeeded() {
-        let current = Constants.versionString
-        guard let lastSeen = Defaults.string(forKey: .lastWhatsNewVersion) else {
-            Defaults.set(current, forKey: .lastWhatsNewVersion)
-            return
-        }
-        guard lastSeen != current else { return }
-        Defaults.set(current, forKey: .lastWhatsNewVersion)
-
-        Task {
-            let allowFetch = settings.advanced.fetchReleaseNotes
-            guard await ChangelogDocument.load(allowFetch: allowFetch).document?.newestRelease != nil else { return }
-            activate(withPolicy: .regular)
-            openWindow(.whatsNew)
-        }
-    }
-
     /// Allows explicit starting of the updater from UI flows.
     func startUpdaterIfNeeded() {
         updatesManager.startUpdaterIfNeeded()
