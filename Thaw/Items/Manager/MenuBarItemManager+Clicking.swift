@@ -393,8 +393,11 @@ extension MenuBarItemManager {
         controller: any MenuBarSectionControlling,
         allowsDirectPress: Bool = true
     ) async -> ConcealedItemOpenAttempt {
+        guard let menuBarManager = appState?.menuBarManager else {
+            return .notDelivered
+        }
         let identifier = item.uniqueIdentifier
-        controller.revealItemTemporarily(identifier)
+        menuBarManager.holdTemporaryReveal(identifier, on: controller)
 
         // Same settle the prewarm uses so the AX bounds are valid. Not gated on
         // isWindowOnScreen: macOS 27 status items carry synthetic window IDs.
@@ -411,7 +414,7 @@ extension MenuBarItemManager {
             MenuBarItemManager.diagLog.warning(
                 "revealInPlaceAndClick: \(item.logString) is not on the bar after the reveal; not clicking"
             )
-            controller.concealTemporarilyRevealedItem(identifier)
+            menuBarManager.releaseTemporaryReveal(identifier, on: controller)
             return .notDelivered
         }
 
@@ -422,18 +425,20 @@ extension MenuBarItemManager {
             MenuBarItemManager.diagLog.error(
                 "revealInPlaceAndClick: click failed for \(item.logString): \(error)"
             )
-            controller.concealTemporarilyRevealedItem(identifier)
+            menuBarManager.releaseTemporaryReveal(identifier, on: controller)
             return .notDelivered
         }
         guard reaction.didReact else {
             // Nothing opened, so nothing to wait for.
-            controller.concealTemporarilyRevealedItem(identifier)
+            menuBarManager.releaseTemporaryReveal(identifier, on: controller)
             return .deliveredUnobserved
         }
 
-        // Let the opened menu settle before scheduling the re-conceal.
+        // Let the opened menu settle, then hand the hold to the temporary-show
+        // interval: the item stays out while its menu is in use.
         await eventSleep(for: Constants.MenuBarTuning.thawBarPostClickSettle)
-        controller.scheduleTemporaryItemConceal(identifier)
+        menuBarManager.showTemporarily(identifier, on: controller)
+        menuBarManager.releaseTemporaryReveal(identifier, on: controller)
         return .reacted
     }
 }

@@ -25,13 +25,49 @@ extension MenuBarItemImageCache {
                     .map(\.tag.tagIdentifier)
             )
         } ?? []
-        diskStore.enqueueSave(
-            Self.diskPersistableCaptures(
-                capturesByTag: capturesByTag,
-                accessTimestamps: accessTimestamps
-            ),
-            concealedIdentifiers: concealedIdentifiers
+        let persistable = Self.diskPersistableCaptures(
+            capturesByTag: capturesByTag,
+            accessTimestamps: accessTimestamps
         )
+        diskStore.enqueueSave(
+            persistable,
+            concealedIdentifiers: concealedIdentifiers,
+            ownerVersions: Self.ownerVersions(for: persistable.keys.map(\.tagIdentifier))
+        )
+    }
+
+    /// The running version of each identifier's owning app, for the ones
+    /// whose owner is running. Keyed by tagIdentifier.
+    static nonisolated func ownerVersions(for identifiers: some Sequence<String>) -> [String: String] {
+        var versionsByBundle = [String: String?]()
+        var result = [String: String]()
+        for identifier in identifiers {
+            guard let bundleID = identifier.split(separator: ":", maxSplits: 1).first.map(String.init) else {
+                continue
+            }
+            let version = versionsByBundle[bundleID] ?? {
+                let resolved = runningVersion(ofBundle: bundleID)
+                versionsByBundle[bundleID] = resolved
+                return resolved
+            }()
+            if let version {
+                result[identifier] = version
+            }
+        }
+        return result
+    }
+
+    /// The bundle version of the running app with bundleID, if one runs.
+    private static nonisolated func runningVersion(ofBundle bundleID: String) -> String? {
+        guard let url = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.bundleURL,
+              let info = Bundle(url: url)?.infoDictionary
+        else {
+            return nil
+        }
+        let short = info["CFBundleShortVersionString"] as? String
+        let build = info["CFBundleVersion"] as? String
+        guard short != nil || build != nil else { return nil }
+        return "\(short ?? "")(\(build ?? ""))"
     }
 
     /// Collapses the live cache to one capture per tagIdentifier, the key the
@@ -142,12 +178,21 @@ extension MenuBarItemImageCache {
             // expired.
             var expiredCount = 0
             var parsed = [(tag: MenuBarItemTag, entry: [String: Any])]()
+            let runningVersions = Self.ownerVersions(for: file.entries.keys)
             for (tagString, entry) in file.entries {
                 let wasConcealed = entry["concealed"] as? Bool ?? false
                 guard file.age <= self.diskStore.diskCacheTTL(
                     for: classifications[tagString],
                     wasConcealed: wasConcealed
                 ) else {
+                    expiredCount += 1
+                    continue
+                }
+                guard MenuBarItemImageCacheDiskStore.isCurrent(
+                    savedOwnerVersion: entry[MenuBarItemImageCacheDiskStore.ownerVersionKey] as? String,
+                    runningOwnerVersion: runningVersions[tagString]
+                ) else {
+                    MenuBarItemImageCache.diagLog.info("Dropping cached glyph for \(tagString): its app was updated")
                     expiredCount += 1
                     continue
                 }

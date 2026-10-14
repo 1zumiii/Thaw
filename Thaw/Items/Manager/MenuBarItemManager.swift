@@ -128,6 +128,12 @@ final class MenuBarItemManager {
     /// keeps on screen at menu level is never taken for an open menu.
     @ObservationIgnored var menusOpenedByClick = [String: Set<CGWindowID>]()
 
+    /// The idle check for concealed items that escaped onto the bar. See
+    /// startEscapedConcealmentWatch().
+    @ObservationIgnored var escapedConcealmentWatchTask: Task<Void, Never>?
+    /// Checks after each app launch. See startEscapedConcealmentWatch().
+    @ObservationIgnored var escapedConcealmentLaunchTask: Task<Void, Never>?
+
     /// Open methods that recently reached each item's owner without a visible
     /// reaction, by canonical identifier. The next request within the window
     /// tries another method instead of repeating one that may have toggled
@@ -1388,6 +1394,7 @@ final class MenuBarItemManager {
         // so everything remains in the hidden section until the user interacts.
         suppressNextNewLeftmostItemRelocation = knownItemIdentifiers.isEmpty
         configureObservers(with: appState)
+        startEscapedConcealmentWatch()
         initialCacheTask?.cancel()
         MenuBarItemManager.diagLog.debug("performSetup: scheduling initial cacheItemsRegardless off the startup critical path")
         self.initialCacheTask = Task { @MainActor [weak self] in

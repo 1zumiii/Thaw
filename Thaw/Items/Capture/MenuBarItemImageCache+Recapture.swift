@@ -726,10 +726,12 @@ extension MenuBarItemImageCache {
             guard !Task.isCancelled, !skipCaptureWhileScreenLocked("revealing capture batch") else { return }
 
             revealedAny = revealedAny || !batch.isEmpty
-            beginPreviewCapture(batch, controller: controller)
+            beginPreviewCapture(batch, controller: controller, appState: appState)
             defer {
+                // Only this capture's hold: an item the user clicked open
+                // meanwhile stays revealed for its own interval.
                 for item in batch {
-                    controller.concealTemporarilyRevealedItem(item.uniqueIdentifier)
+                    appState.menuBarManager.releaseTemporaryReveal(item.uniqueIdentifier, on: controller)
                 }
             }
             guard await captureInitialPreviewBatch(
@@ -745,9 +747,13 @@ extension MenuBarItemImageCache {
     }
 
     @MainActor
-    private func beginPreviewCapture(_ batch: [MenuBarItem], controller: any MenuBarSectionControlling) {
+    private func beginPreviewCapture(
+        _ batch: [MenuBarItem],
+        controller: any MenuBarSectionControlling,
+        appState: AppState
+    ) {
         for item in batch {
-            controller.revealItemTemporarily(item.uniqueIdentifier)
+            appState.menuBarManager.holdTemporaryReveal(item.uniqueIdentifier, on: controller)
         }
     }
 
@@ -1179,6 +1185,8 @@ extension MenuBarItemImageCache {
     func clearAll() {
         removeAllCaptures()
         initialPreviewCaptureAttempts.removeAll()
+        exhaustedInitialPreviews.removeAll()
+        retriedInitialPreviews.removeAll()
         accessTimestamps.removeAll()
         accessCounter = 0
         failedCapturesLock.withLock { $0.removeAll() }

@@ -71,6 +71,13 @@ final class MenuBarItemImageCache: @unchecked Sendable {
     @ObservationIgnored var isConcealedPrewarmRunning = false
     /// Completed sessions suppress repeated reveals; interrupted sessions may retry.
     @ObservationIgnored var initialPreviewCaptureAttempts = Set<String>()
+    /// Completed sessions that ended without a trusted glyph. A change that
+    /// can explain the miss lets them try once more; see
+    /// retryExhaustedInitialPreviews(reason:).
+    @ObservationIgnored var exhaustedInitialPreviews = Set<String>()
+    /// Items already given that one extra session this run, so an item that
+    /// can never be captured does not reveal on every display change.
+    @ObservationIgnored var retriedInitialPreviews = Set<String>()
     /// When recapture last asked for a fresh inventory walk; see requestInventoryRefresh(reason:).
     @ObservationIgnored var lastInventoryRefreshRequest: ContinuousClock.Instant?
     @ObservationIgnored var concealedPrewarmWaiters = [CheckedContinuation<Void, Never>]()
@@ -362,6 +369,15 @@ final class MenuBarItemImageCache: @unchecked Sendable {
                 .store(in: &installed)
             let itemCacheChangePublisher: AnyPublisher<Void, Never> = itemCacheChangeSubject
                 .eraseToAnyPublisher()
+
+            // A display change can explain a capture that came back empty.
+            // Marking only makes the item eligible; the next prewarm captures it.
+            screenChangePublisher
+                .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.retryExhaustedInitialPreviews(reason: "display configuration changed")
+                }
+                .store(in: &installed)
 
             Publishers.MergeMany([
                 spaceChangePublisher,

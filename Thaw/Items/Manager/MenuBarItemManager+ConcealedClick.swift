@@ -135,8 +135,7 @@ extension MenuBarItemManager {
                     "clickConcealedItem: \(item.logString) took \(method.rawValue) without a visible reaction; not repeating it"
                 )
                 unverifiedOpenMethods[identity.key] = (unverified.union([method]), .now)
-                controller.revealItemTemporarily(item.uniqueIdentifier)
-                controller.scheduleTemporaryItemConceal(item.uniqueIdentifier)
+                appState?.menuBarManager.showTemporarily(item.uniqueIdentifier, on: controller)
                 return .completed(reactionObserved: false)
             case .notDelivered:
                 MenuBarItemManager.diagLog.debug(
@@ -151,8 +150,7 @@ extension MenuBarItemManager {
         MenuBarItemManager.diagLog.warning(
             "clickConcealedItem: no method reached \(item.logString); leaving it shown in the menu bar"
         )
-        controller.revealItemTemporarily(item.uniqueIdentifier)
-        controller.scheduleTemporaryItemConceal(item.uniqueIdentifier)
+        appState?.menuBarManager.showTemporarily(item.uniqueIdentifier, on: controller)
         return .activationFailed
     }
 

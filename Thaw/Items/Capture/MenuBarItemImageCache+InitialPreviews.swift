@@ -66,9 +66,28 @@ extension MenuBarItemImageCache {
         }
 
         initialPreviewCaptureAttempts.formUnion(batch.map(\.tag.tagIdentifier))
+        exhaustedInitialPreviews.subtract(batch.map(\.tag.tagIdentifier))
         if !pending.isEmpty {
+            exhaustedInitialPreviews.formUnion(pending.map(\.tag.tagIdentifier))
             Self.diagLog.warning("Initial preview capture exhausted: \(pending.map(\.uniqueIdentifier))")
         }
         return true
+    }
+
+    /// Lets items whose initial capture was exhausted try one more session,
+    /// after a change that can explain the miss (a display change, a
+    /// screen-recording grant).
+    ///
+    /// Each item gets this once per run, so an item that can never be
+    /// captured does not reveal again on every change. Items that captured
+    /// successfully are never touched.
+    @MainActor
+    func retryExhaustedInitialPreviews(reason: String) {
+        let eligible = exhaustedInitialPreviews.subtracting(retriedInitialPreviews)
+        guard !eligible.isEmpty else { return }
+        initialPreviewCaptureAttempts.subtract(eligible)
+        exhaustedInitialPreviews.subtract(eligible)
+        retriedInitialPreviews.formUnion(eligible)
+        Self.diagLog.info("Allowing one more initial capture for \(eligible.sorted()) (\(reason))")
     }
 }

@@ -528,8 +528,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        sectionController.revealItemTemporarily(identifier)
-        sectionController.scheduleTemporaryItemConceal(identifier)
+        appState.menuBarManager.showTemporarily(identifier)
         appState.diagLog.info("Settings URI reveal-item: revealed \(identifier) for sender \(sender ?? "unknown")")
     }
 

@@ -52,7 +52,7 @@ final class MenuBarManager {
 
     /// Weak because AppState owns this manager.
     @ObservationIgnored
-    private weak var appState: AppState?
+    private(set) weak var appState: AppState?
 
     /// Engine-facing settings, assigned at setup with shared defaults beforehand; see MenuBarEngineConfiguration.
     private var configuration: any MenuBarEngineConfiguration = AppSettings.engineDefaults
@@ -164,6 +164,11 @@ final class MenuBarManager {
 
     /// Concrete access for platform-typed operations, exposed to callers only through this manager.
     private var runtimeSectionController: RuntimeSectionController?
+
+    /// Who holds each temporarily revealed item. See TemporaryRevealLeases and
+    /// MenuBarManager+TemporaryReveals.
+    @ObservationIgnored
+    var temporaryRevealLeases = TemporaryRevealLeases()
 
     /// Preassign stand-ins before creation so they are not born into a concealed section.
     func assignSection(_ section: MenuBarSection.Name, identifier: String) {

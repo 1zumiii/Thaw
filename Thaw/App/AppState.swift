@@ -187,11 +187,22 @@ final class AppState {
         diagLog.debug("bootstrap: permissions state = \(String(describing: self.permissions.permissionsState)), accessibility = \(self.permissions.accessibility.hasPermission), screenRecording = \(self.permissions.screenRecording.hasPermission)")
 
         settings.performSetup(with: self)
+        // The section controller reads the whole bar synchronously on the main
+        // actor as it starts. Walk it off the main actor first, so that read
+        // finds a complete answer instead of walking every app with input stalled.
+        if permissions.accessibility.hasPermission {
+            await MenuBarItemAXProvider.prewarmCompleteInventory(timeout: .milliseconds(1500))
+        }
         menuBarManager.performSetup(with: self)
         // A refused preferences watcher stays stopped; recreate it after either a table-file grant or Full Disk Access.
         permissions.onPermissionTransition = { [weak self] permission, granted in
-            guard let self, granted, permission === permissions.fullDiskAccess else { return }
-            (menuBarManager.sectionController as? RuntimeSectionController)?.restartPreferencesWatcher()
+            guard let self, granted else { return }
+            if permission === permissions.fullDiskAccess {
+                (menuBarManager.sectionController as? RuntimeSectionController)?.restartPreferencesWatcher()
+            } else if permission === permissions.screenRecording {
+                // Captures taken without the grant come back empty.
+                imageCache.retryExhaustedInitialPreviews(reason: "screen recording granted")
+            }
         }
         diagLog.debug("bootstrap: settings and menuBarManager setup complete")
 
@@ -205,8 +216,8 @@ final class AppState {
         imageCache.activate(with: self)
         alertRevealWatcher.performSetup(with: self)
         appRunningTriggers.start(
-            reveal: { [weak self] in self?.menuBarManager.sectionController.revealItemTemporarily($0) },
-            release: { [weak self] in self?.menuBarManager.sectionController.concealTemporarilyRevealedItem($0) }
+            reveal: { [weak self] in self?.menuBarManager.holdTemporaryReveal($0) },
+            release: { [weak self] in self?.menuBarManager.releaseTemporaryReveal($0) }
         )
         presentationMonitor.performSetup(with: self)
         spacerManager.performSetup(with: self)

@@ -8,6 +8,10 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # Fail before a long build if the persisted signing identity cannot be reused.
 bash "$SCRIPT_DIR/setup-custom-signing.sh" > /dev/null
+# The last build's bundle was re-signed with the fixed key below. An
+# incremental build keeps those embedded binaries but ad-hoc signs the app
+# again, and Xcode then rejects the mismatch, so start from a fresh bundle.
+rm -rf "$BUILD_DIR/Build/Products/Release/Thaw.app"
 xcodebuild -project Thaw.xcodeproj -scheme Thaw -configuration Release \
     -destination 'platform=macOS' -derivedDataPath "$BUILD_DIR" \
     -onlyUsePackageVersionsFromResolvedFile -skipPackageUpdates \

@@ -884,7 +884,38 @@ nonisolated enum MenuBarItemAXProvider {
         if plan.scope == .discovery, snapshot.completed || snapshot.hasFreshKnownInventory {
             fullWalks.noteFullWalk()
         }
-        return restoredIdentities(snapshot)
+        let restored = restoredIdentities(snapshot)
+        if restored.completed {
+            completeInventory.withLock { $0 = restored.items }
+        }
+        return restored
+    }
+
+    /// The latest concurrent walk that read every running owner.
+    ///
+    /// Main-actor callers that need a whole inventory synchronously read this
+    /// instead of walking every app themselves. See
+    /// RuntimeSectionContextAdapter.freshMenuBarItems().
+    static var latestCompleteInventory: [MenuBarItem]? {
+        completeInventory.withLock { $0 }
+    }
+
+    private static let completeInventory = OSAllocatedUnfairLock<[MenuBarItem]?>(initialState: nil)
+
+    /// Walks off the main actor until latestCompleteInventory holds an answer,
+    /// or until timeout passes. The walk keeps running past the timeout and
+    /// still publishes its answer.
+    @concurrent
+    static func prewarmCompleteInventory(timeout: Duration) async {
+        let walk = Task.detached(priority: .userInitiated) {
+            _ = await menuBarInventoryConcurrent()
+        }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { _ = await valueOrCancelled(of: walk) }
+            group.addTask { try? await Task.sleep(for: timeout) }
+            await group.next()
+            group.cancelAll()
+        }
     }
 
     /// See InventoryWalkPlan.

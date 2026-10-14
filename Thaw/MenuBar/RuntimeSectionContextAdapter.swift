@@ -106,10 +106,21 @@ final class RuntimeSectionContextAdapter: RuntimeSectionContext {
                 diagLog.warning("freshMenuBarItems: walk incomplete, serving the last complete answer")
                 return lastCompleteMenuBarItems
             }
-            // No complete answer yet: pay the unbounded walk once.
-            diagLog.warning("freshMenuBarItems: no complete answer yet, walking without a budget")
+            // The launch prewarm and the cache walks publish whole answers read
+            // off the main actor; one of them stands in for our own.
+            if let prewarmed = MenuBarItemAXProvider.latestCompleteInventory {
+                diagLog.info("freshMenuBarItems: walk incomplete, serving the off-main complete answer")
+                let items = PositionStoreItemSource.recovering(prewarmed)
+                lastCompleteMenuBarItems = items
+                return items
+            }
+            // No complete answer anywhere yet: pay the unbounded walk once.
+            let start = ContinuousClock.now
             let full = PositionStoreItemSource.recovering(
                 MenuBarItemAXProvider.menuBarItems(option: [])
+            )
+            diagLog.warning(
+                "freshMenuBarItems: no complete answer yet; walked without a budget in \(ContinuousClock.now - start)"
             )
             lastCompleteMenuBarItems = full
             return full

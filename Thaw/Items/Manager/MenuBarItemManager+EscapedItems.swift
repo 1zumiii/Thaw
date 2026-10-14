@@ -48,4 +48,39 @@ extension MenuBarItemManager {
         Self.diagLog.info("Reapplying concealment for exposed items: \(escaped.map(\.uniqueIdentifier))")
         controller.refresh(forceRestrictionPulse: false, forceReapply: true)
     }
+
+    /// How often the idle check reads the drawn bar.
+    static let escapedConcealmentCheckInterval = Duration.seconds(60)
+
+    /// How long after an app launches its item is checked: long enough for it
+    /// to publish the item and for the controller's own adoption to run first.
+    static let escapedConcealmentLaunchDelay = Duration.seconds(5)
+
+    /// Checks for escaped concealed items while the Thaw Bar is closed.
+    ///
+    /// The Thaw Bar open path only covers items that escape while the user
+    /// looks. This catches one that appears while idle, chiefly an app
+    /// launching. reapplyEscapedConcealment() already stands down during a
+    /// reveal, an open menu or a capture, and reads the drawn bar off the main actor.
+    @MainActor
+    func startEscapedConcealmentWatch() {
+        escapedConcealmentWatchTask?.cancel()
+        escapedConcealmentWatchTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.escapedConcealmentCheckInterval)
+                await self?.reapplyEscapedConcealment()
+            }
+        }
+        escapedConcealmentLaunchTask?.cancel()
+        escapedConcealmentLaunchTask = Task { @MainActor [weak self] in
+            let launches = NSWorkspace.shared.notificationCenter.notifications(
+                named: NSWorkspace.didLaunchApplicationNotification
+            )
+            for await _ in launches {
+                try? await Task.sleep(for: Self.escapedConcealmentLaunchDelay)
+                guard !Task.isCancelled else { return }
+                await self?.reapplyEscapedConcealment()
+            }
+        }
+    }
 }

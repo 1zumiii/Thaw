@@ -106,6 +106,20 @@ final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {
     /// would otherwise never be replaced.
     private static nonisolated let cacheVersion = 12
 
+    /// The entry key holding the owning app's version when the glyph was saved.
+    static nonisolated let ownerVersionKey = "ownerVersion"
+
+    /// Whether a saved entry still describes the app now running.
+    ///
+    /// Concealed glyphs never expire by age, so an app update that redraws
+    /// its icon would otherwise be shown with the old one indefinitely. A
+    /// dropped entry is captured again once, like a new item. An entry or an
+    /// owner without a version cannot be judged and is kept.
+    static nonisolated func isCurrent(savedOwnerVersion: String?, runningOwnerVersion: String?) -> Bool {
+        guard let savedOwnerVersion, let runningOwnerVersion else { return true }
+        return savedOwnerVersion == runningOwnerVersion
+    }
+
     /// How long an unchanged cache may go without its file being re-stamped.
     ///
     /// The saved timestamp is what loadFromDisk() ages every entry
@@ -160,13 +174,16 @@ final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {
         /// Identifiers in pending that were concealed, written as a flag
         /// on each entry.
         var pendingConcealed = Set<String>()
+        /// The owning app's version for identifiers in pending, written on
+        /// each entry so a load can drop a glyph the app has since replaced.
+        var pendingOwnerVersions = [String: String]()
         /// Whether a drain block is queued or running. One is enough: it
         /// writes whatever pending holds when it gets there, so requests
         /// arriving in the meantime coalesce into that single write.
         var isDrainScheduled = false
         /// The digest and wall-clock time of the last write that landed, or
         /// nil when the file's contents are unknown to this process.
-        var lastWritten: (digest: DiskCacheDigest, concealed: Set<String>, at: Date)?
+        var lastWritten: (digest: DiskCacheDigest, concealed: Set<String>, ownerVersions: [String: String], at: Date)?
     }
 
     private let diskSaveState = OSAllocatedUnfairLock(initialState: DiskSaveState())
@@ -196,7 +213,8 @@ final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {
     /// block writes whichever one is parked when it runs.
     nonisolated func enqueueSave(
         _ snapshot: [MenuBarItemTag: MenuBarItemGlyphCapture],
-        concealedIdentifiers: Set<String> = []
+        concealedIdentifiers: Set<String> = [],
+        ownerVersions: [String: String] = [:]
     ) {
         guard isEnabled, !snapshot.isEmpty else { return }
         guard let url = cacheFileURL else { return }
@@ -207,6 +225,7 @@ final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {
         let needsDrain = diskSaveState.withLock { state -> Bool in
             state.pending = snapshot
             state.pendingConcealed = concealedIdentifiers
+            state.pendingOwnerVersions = ownerVersions
             guard !state.isDrainScheduled else { return false }
             state.isDrainScheduled = true
             return true
@@ -225,20 +244,23 @@ final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {
     /// start mattering, in which case it needs a new timestamp and nothing
     /// else. Only a cache that actually changed pays for the encode.
     private nonisolated func drainPendingSave(to url: URL, legacyURL: URL?) {
-        let (snapshot, concealed) = diskSaveState.withLock { state in
+        let (snapshot, concealed, ownerVersions) = diskSaveState.withLock { state in
             state.isDrainScheduled = false
             defer {
                 state.pending = nil
                 state.pendingConcealed = []
+                state.pendingOwnerVersions = [:]
             }
-            return (state.pending, state.pendingConcealed)
+            return (state.pending, state.pendingConcealed, state.pendingOwnerVersions)
         }
         guard let snapshot, !snapshot.isEmpty, isEnabled else { return }
 
         let digest = DiskCacheDigest(snapshot)
         let now = Date()
         let unchangedSince = diskSaveState.withLock { state -> Date? in
-            guard let last = state.lastWritten, last.digest == digest, last.concealed == concealed else {
+            guard let last = state.lastWritten, last.digest == digest, last.concealed == concealed,
+                  last.ownerVersions == ownerVersions
+            else {
                 return nil
             }
             return last.at
@@ -249,7 +271,7 @@ final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {
                 return
             }
             if restampCacheFile(at: url, to: now) {
-                diskSaveState.withLock { $0.lastWritten = (digest, concealed, now) }
+                diskSaveState.withLock { $0.lastWritten = (digest, concealed, ownerVersions, now) }
                 return
             }
             // The re-stamp could not read back what it was told is there, so
@@ -291,6 +313,9 @@ final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {
                     if concealed.contains(identifier) {
                         entry["concealed"] = true
                     }
+                    if let ownerVersion = ownerVersions[identifier] {
+                        entry[Self.ownerVersionKey] = ownerVersion
+                    }
                     return (identifier, entry)
                 },
                 uniquingKeysWith: { _, latest in latest }
@@ -314,7 +339,7 @@ final class MenuBarItemImageCacheDiskStore: @unchecked Sendable {
                 try? FileManager.default.removeItem(at: legacyURL)
             }
 
-            diskSaveState.withLock { $0.lastWritten = (digest, concealed, writtenAt) }
+            diskSaveState.withLock { $0.lastWritten = (digest, concealed, ownerVersions, writtenAt) }
             Self.diagLog.debug("Saved \(cacheData.count) images to disk cache")
         } catch {
             // Leave lastWritten alone: the file is not what this digest
