@@ -64,6 +64,7 @@ After you update:
 
 ### Fixed: Settings
 
+- **Applying a profile no longer restarts your menu bar apps without asking.** A profile saved with "Confirm before relaunching apps" off, or with spacing set to relaunch apps, put those settings back each time you applied it, so Thaw quit and reopened your menu bar apps. A profile can now only make these settings safer. Turning confirmation off takes a change in Settings > Displays. Fixed by @diazdesandi.
 - **"Don't ask again" sticks when you click Cancel** in the spacing prompt. A display change no longer asks and no longer relaunches apps. Reported and first fixed by @django23 in [#1319](https://github.com/thaw-app/Thaw/issues/1319) and [#1320](https://github.com/thaw-app/Thaw/pull/1320).
 - **Each onboarding card opens the pane it describes.** Find anything and Reveal opened General, Thaw Bar opened Displays and Rules opened Automation. Fixed by @diazdesandi.
 - **Settings search matches the panes.** It listed three things that no longer exist and missed five shortcuts: Swap, Open an item by letter, Reveal the menu bar, Zen Mode and Show Layout. Fixed by @diazdesandi.
