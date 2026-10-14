@@ -501,8 +501,10 @@ struct GroupedRevealPublicationTests {
     private func prewarm(
         _ world: CaptureWorld,
         controller: RevealingSectionController,
-        whileSettling: @escaping @MainActor () -> Void = {}
+        unsettledPasses: Int = 0,
+        whileSettling: @escaping @MainActor () async -> Void = {}
     ) async {
+        var settlePass = 0
         await world.cache.captureRevealBatches(
             [[world.fresh], [world.retried]],
             controller: controller,
@@ -513,7 +515,11 @@ struct GroupedRevealPublicationTests {
             appState: world.appState,
             sources: .init(
                 settledItems: { batch in
-                    whileSettling()
+                    await whileSettling()
+                    settlePass += 1
+                    if settlePass <= unsettledPasses {
+                        return []
+                    }
                     return batch.map { (requested: $0, live: $0) }
                 },
                 renderSettle: {},
@@ -562,6 +568,7 @@ struct GroupedRevealPublicationTests {
         #expect(world.state == before)
         #expect(controller.revealed == [world.fresh.uniqueIdentifier], "No further batch is revealed")
         #expect(controller.concealed == [world.fresh.uniqueIdentifier])
+        #expect(world.cache.initialPreviewCaptureAttempts.isEmpty)
     }
 
     @Test("A display that switches while the reveal settles is not adopted as the batch's baseline")
@@ -575,5 +582,58 @@ struct GroupedRevealPublicationTests {
         #expect(await world.reader.captures.isEmpty, "No pixels are taken for a batch that cannot publish")
         #expect(controller.revealed == [world.fresh.uniqueIdentifier])
         #expect(controller.concealed == [world.fresh.uniqueIdentifier])
+    }
+
+    @Test("Transient settle misses retry inside one reveal and save the original glyph")
+    func transientMissRecoversWithoutRevealingAgain() async throws {
+        let (world, controller) = try makeWorld(gated: false)
+        await prewarm(world, controller: controller, unsettledPasses: 2)
+
+        #expect(world.cache.capturesByTag[world.fresh.tag] != nil)
+        #expect(controller.revealed == [world.fresh, world.retried].map(\.uniqueIdentifier))
+        #expect(controller.concealed == controller.revealed)
+        #expect(world.cache.initialPreviewCaptureAttempts.contains(world.fresh.tag.tagIdentifier))
+    }
+
+    @Test("A missing first screenshot recovers without hiding and revealing again")
+    func transientPixelFailureRecovers() async throws {
+        let (world, controller) = try makeWorld(gated: false)
+        let strip = await world.reader.strip
+        var settles = 0
+        await prewarm(world, controller: controller, whileSettling: {
+            settles += 1
+            await world.reader.setStrip(settles == 1 ? nil : strip)
+        })
+        #expect(settles == 3, "The first batch retries once, then the second batch captures")
+        #expect(world.cache.capturesByTag[world.fresh.tag] != nil)
+        #expect(controller.revealed.count == 2)
+        #expect(controller.concealed == controller.revealed)
+    }
+
+    @Test("Cancelling initial capture leaves it eligible for the next open")
+    func cancelledSessionCanRetry() async throws {
+        let (world, controller) = try makeWorld(gated: false)
+        let pass = Task {
+            await prewarm(world, controller: controller, whileSettling: {
+                withUnsafeCurrentTask { $0?.cancel() }
+            })
+        }
+        await pass.value
+        #expect(world.cache.initialPreviewCaptureAttempts.isEmpty)
+        #expect(controller.concealed == [world.fresh.uniqueIdentifier])
+
+        await prewarm(world, controller: controller)
+        #expect(world.cache.capturesByTag[world.fresh.tag] != nil)
+    }
+
+    @Test("An unavailable item exhausts a bounded session without repeated reveals")
+    func exhaustedSessionIsBounded() async throws {
+        let (world, controller) = try makeWorld(gated: false)
+        var polls = 0
+        await prewarm(world, controller: controller, unsettledPasses: 100, whileSettling: { polls += 1 })
+        #expect(polls == 6, "Three attempts for each of two batches")
+        #expect(controller.revealed.count == 2)
+        #expect(controller.concealed == controller.revealed)
+        #expect(world.cache.initialPreviewCaptureAttempts.count == 2)
     }
 }

@@ -62,7 +62,7 @@ extension MenuBarItemImageCache {
     /// recapture passes also honour the reset flag and the move cooldown; the
     /// grouped prewarm reveals items itself and answers only to layout and display.
     @MainActor
-    private func publicationRejection(
+    func publicationRejection(
         of admission: CapturePublicationAdmission,
         appState: AppState,
         ignoreRecentMove: Bool,
@@ -566,8 +566,10 @@ extension MenuBarItemImageCache {
 
             let liveItems = await MenuBarItem.getMenuBarItems(
                 on: displayID,
-                option: [.onScreen, .activeSpace]
+                option: [.onScreen, .activeSpace],
+                freshOnly: true
             )
+            let drawn = await MenuBarItemAXProvider.drawnBarConcurrent()
 
             // Every member is offered to the match, settled ones included, so a
             // member that settled on an earlier poll keeps its claim and cannot
@@ -575,7 +577,10 @@ extension MenuBarItemImageCache {
             let matches = Self.revealMatches(requests: items, live: liveItems)
             let currentByIdentifier = Dictionary(
                 matches.enumerated().compactMap { index, liveItem in
-                    liveItem.map { (items[index].uniqueIdentifier, $0) }
+                    liveItem.flatMap { live in
+                        Self.isSeatedForPreview(live, drawn: drawn)
+                            ? (items[index].uniqueIdentifier, live) : nil
+                    }
                 },
                 uniquingKeysWith: { first, _ in first }
             )
@@ -727,62 +732,14 @@ extension MenuBarItemImageCache {
                     controller.concealTemporarilyRevealedItem(item.uniqueIdentifier)
                 }
             }
-
-            let revealed = await sources.settledItems(batch)
-            guard !skipCaptureWhileScreenLocked("capture reveal completed") else { return }
-            guard !revealed.isEmpty else { continue }
-
-            // AX bounds stabilize before MenuBarAgent finishes recompositing
-            // the revealed glyphs; wait one render settle so the screenshot
-            // captures fully-rendered icons. One settle for the group, since
-            // they were revealed together.
-            await sources.renderSettle()
-            guard !Task.isCancelled, !skipCaptureWhileScreenLocked("settled capture batch") else { return }
-
-            // Admitted here, after the reveal and its settle, with nothing
-            // awaited before the screenshot. Rebuilding the restriction for the
-            // reveal (and for the previous batch's conceal) moves the layout
-            // generation by itself, so an admission taken any earlier would
-            // reject every batch. From here on a change is a real move.
-            let admission = CapturePublicationPolicy.admit(
-                layout: appState.itemManager.layoutPublication,
-                displayID: admittedDisplayID
-            )
-            // A move already running, or a display that switched while the
-            // reveal settled: do not screenshot a bar this batch cannot publish.
-            if let rejection = publicationRejection(
-                of: admission, appState: appState, ignoreRecentMove: true, isRecapturePass: false
-            ) {
-                MenuBarItemImageCache.diagLog.debug(
-                    "grouped reveal capture: not capturing batch, stopping (\(String(describing: rejection)))"
-                )
-                return
-            }
-
-            // One hosting screenshot and one strip screenshot for the whole
-            // group: axBoundsCapture already crops each item out of the same
-            // pair of frames, so every crop comes from one instant of the bar
-            // rather than from N frames taken while it reflowed between them.
-            // Capture against the resolved displayID directly rather than
-            // captureImages(appState:), which re-resolves the "active" display
-            // and can crop one display's bounds against another's screenshot.
-            let captureResult = await axBoundsCapture(
-                revealed.map { (item: $0.live, bounds: $0.live.bounds) },
-                scale: scale,
+            guard await captureInitialPreviewBatch(
+                batch,
                 displayID: displayID,
-                validateFreshBounds: true,
-                // This path just revealed the items itself and waited for
-                // their live AX elements, so none of them is concealed here.
-                concealedIdentifiers: [],
-                using: sources.reader
-            )
-
-            guard commitRevealedBatch(
-                captureResult,
-                revealed: revealed,
-                admission: admission,
+                admittedDisplayID: admittedDisplayID,
+                scale: scale,
                 missPolicy: missPolicy,
-                appState: appState
+                appState: appState,
+                sources: sources
             ) else { return }
         }
     }
@@ -790,7 +747,6 @@ extension MenuBarItemImageCache {
     @MainActor
     private func beginPreviewCapture(_ batch: [MenuBarItem], controller: any MenuBarSectionControlling) {
         for item in batch {
-            initialPreviewCaptureAttempts.insert(item.tag.tagIdentifier)
             controller.revealItemTemporarily(item.uniqueIdentifier)
         }
     }

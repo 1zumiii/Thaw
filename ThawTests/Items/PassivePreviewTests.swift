@@ -10,6 +10,7 @@ import MenuBarModel
 import Synchronization
 import Testing
 @testable import Thaw
+import ThawAXCore
 
 @MainActor
 @Suite("Passive previews reuse cached glyphs")
@@ -76,5 +77,23 @@ struct PassivePreviewTests {
     func firstCaptureOnly() {
         #expect(MenuBarItemImageCache.shouldCaptureInitialPreview(cachedImage: nil, wasAttempted: false))
         #expect(!MenuBarItemImageCache.shouldCaptureInitialPreview(cachedImage: nil, wasAttempted: true))
+    }
+
+    @Test("Stable stale AX frames do not prove that a revealed icon is drawable")
+    func hostMustDrawTheSameOwnerAtTheSamePosition() {
+        let bounds = CGRect(x: 900, y: 4.5, width: 24, height: 24)
+        let item = MenuBarItem(
+            tag: MenuBarItemTag(namespace: .string("com.example.hidden"), title: "Item-0", instanceIndex: 0),
+            windowID: 1, ownerPID: 42, sourcePID: 43, bounds: bounds, title: "Item-0", isOnScreen: true
+        )
+        #expect(!MenuBarItemImageCache.isSeatedForPreview(item, drawn: nil))
+        #expect(!MenuBarItemImageCache.isSeatedForPreview(item, drawn: []))
+        #expect(!MenuBarItemImageCache.isSeatedForPreview(item, drawn: [.init(ownerPID: 42, frame: bounds)]))
+        #expect(!MenuBarItemImageCache.isSeatedForPreview(item, drawn: [
+            .init(ownerPID: 43, frame: bounds.offsetBy(dx: 40, dy: 0)),
+        ]))
+        #expect(MenuBarItemImageCache.isSeatedForPreview(item, drawn: [
+            .init(ownerPID: 43, frame: CGRect(x: 900, y: 0, width: 24, height: 33)),
+        ]))
     }
 }

@@ -69,7 +69,7 @@ final class MenuBarItemImageCache: @unchecked Sendable {
     /// queued behind it. Main actor only. See
     /// prewarmConcealedImages(sections:onlyMissingImages:).
     @ObservationIgnored var isConcealedPrewarmRunning = false
-    /// Failed first captures must not flash the same item on every panel open.
+    /// Completed sessions suppress repeated reveals; interrupted sessions may retry.
     @ObservationIgnored var initialPreviewCaptureAttempts = Set<String>()
     /// When recapture last asked for a fresh inventory walk; see requestInventoryRefresh(reason:).
     @ObservationIgnored var lastInventoryRefreshRequest: ContinuousClock.Instant?

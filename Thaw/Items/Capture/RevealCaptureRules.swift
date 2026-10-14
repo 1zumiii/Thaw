@@ -8,6 +8,7 @@
 import CoreGraphics
 import Foundation
 import MenuBarModel
+import ThawAXCore
 
 extension MenuBarItemImageCache {
     // MARK: Reveal Capture Rules
@@ -52,6 +53,16 @@ extension MenuBarItemImageCache {
     /// lane is wide, so grouping stays there to avoid the reveal parade.
     static nonisolated func revealBatchSize(hasNotch: Bool) -> Int {
         hasNotch ? 1 : revealCaptureBatchSize
+    }
+
+    /// Concealed apps can keep publishing stable, stale AX frames. The host
+    /// must actually draw this owner at that frame before its reveal can settle.
+    static nonisolated func isSeatedForPreview(_ item: MenuBarItem, drawn: [MenuBarAgentWindow.Entry]?) -> Bool {
+        guard isPlausibleItemCaptureBounds(item.bounds), let drawn else { return false }
+        let ownerPID = item.sourcePID ?? item.ownerPID
+        return drawn.contains { entry in
+            entry.ownerPID == ownerPID && entry.frame.insetBy(dx: -1, dy: -1).contains(item.bounds)
+        }
     }
 
     /// Pairs each requested reveal with the live item that answers it, in

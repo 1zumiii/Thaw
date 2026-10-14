@@ -556,7 +556,7 @@ actor CaptureFixture {
 
     let hosting: ScreenCapture.MenuBarHostingCapture?
     let barWindow: ScreenCapture.MenuBarHostingCapture?
-    let strip: ScreenCapture.MenuBarHostingCapture?
+    private(set) var strip: ScreenCapture.MenuBarHostingCapture?
     let geometry: Geometry
     private(set) var items: [MenuBarItem]
     let stripOverflowBounds: [CGRect]
@@ -598,6 +598,10 @@ actor CaptureFixture {
 
     func setItems(_ items: [MenuBarItem]) {
         self.items = items
+    }
+
+    func setStrip(_ capture: ScreenCapture.MenuBarHostingCapture?) {
+        strip = capture
     }
 
     func captureBand(displayID _: CGDirectDisplayID) async -> (frame: CGRect, menuMaxX: CGFloat?) {
