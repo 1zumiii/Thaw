@@ -46,6 +46,18 @@ nonisolated enum AXHelpers {
         try? app.attribute(.extrasMenuBar)
     }
 
+    /// extrasMenuBar(for:), but a read that failed throws instead of reading
+    /// as an app without an extras bar. Nil means the app has none.
+    static func readExtrasMenuBar(for app: Application) throws -> UIElement? {
+        try app.attribute(.extrasMenuBar)
+    }
+
+    /// children(for:), but a read that failed throws instead of reading as
+    /// an element without children.
+    static func readChildren(for element: UIElement) throws -> [UIElement] {
+        try element.arrayAttribute(.children) ?? []
+    }
+
     /// Everything the walk reads from one extras-bar child, in one message.
     /// The timeout bounds each read, so batching caps a slow app at one timeout
     /// per item. Unanswered attributes are nil, as in the single accessors.

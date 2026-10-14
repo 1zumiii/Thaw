@@ -37,12 +37,20 @@ public enum MenuBarAgentIdentityReconciler {
     ///   - fresh: The walk just completed.
     ///   - previous: The last walk whose MenuBarAgent extras were identified.
     public static func reconcile(fresh: [MenuBarItem], previous: [MenuBarItem]) -> Result {
+        // An identity this walk already read off a named item is taken: handing
+        // it to an unnamed neighbour would publish one identity twice.
+        let claimed = fresh.filter { item in
+            item.tag.namespace == .menuBarAgent && !isUnnamedHostExtra(item.tag)
+        }
         // Only extras the host identifies can degrade to a positional name,
         // so only they have a previous identity worth carrying forward.
         var candidates = previous
             .filter { $0.tag.namespace == .menuBarAgent }
             .filter { !$0.tag.isControlCenterGenericItem }
             .filter { !$0.isControlItem && !$0.isNativeOverflowControl }
+            .filter { candidate in
+                !claimed.contains { $0.tag.matchesIgnoringWindowID(candidate.tag) }
+            }
         guard !candidates.isEmpty else {
             return Result(items: fresh, restoredCount: 0)
         }
@@ -96,15 +104,23 @@ public enum MenuBarAgentIdentityReconciler {
 
     /// Reconciles fresh against the last identified walk and remembers it.
     ///
-    /// Degraded and empty walks leave the snapshot standing, so a transition
-    /// cannot erase the memory the next degraded walk needs.
-    public static func reconciling(_ fresh: [MenuBarItem]) -> Result {
+    /// Only a whole walk whose identities all came from the host replaces the
+    /// snapshot. Degraded, restored, empty and partial walks leave it standing,
+    /// so a transition cannot erase the memory the next degraded walk needs.
+    ///
+    /// - Parameters:
+    ///   - fresh: The walk just completed.
+    ///   - remembers: Whether fresh covers the whole bar. Pass false for
+    ///     truncated walks and owner-scoped subsets.
+    public static func reconciling(_ fresh: [MenuBarItem], remembers: Bool = true) -> Result {
         let previous = lastIdentified.withLock { $0 }
         let result = reconcile(fresh: fresh, previous: previous)
         let carriesIdentity = result.items.contains { item in
             item.tag.namespace == .menuBarAgent && !item.tag.isControlCenterGenericItem
         }
-        if carriesIdentity {
+        // A restored identity is a guess from the snapshot, not a fresh
+        // reading, so it must never become the next snapshot's authority.
+        if remembers, carriesIdentity, result.restoredCount == 0 {
             lastIdentified.withLock { $0 = result.items }
         }
         if result.restoredCount > 0 {

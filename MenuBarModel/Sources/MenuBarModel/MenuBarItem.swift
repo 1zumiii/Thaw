@@ -157,6 +157,28 @@ public struct MenuBarItem: CustomStringConvertible, Sendable, Codable {
             (sourcePID ?? ownerPID) == (other.sourcePID ?? other.ownerPID)
     }
 
+    /// Whether candidate may be this item under a title that changed since
+    /// it was read, the only case a same-owner fallback may resolve.
+    ///
+    /// A stably titled item is never re-located onto a stably titled
+    /// sibling: when its own entry is missing, the sibling is another icon.
+    /// Callers still require a unique or nearby candidate.
+    public func mayBeRetitled(as candidate: MenuBarItem) -> Bool {
+        guard hasSameOwner(as: candidate),
+              !candidate.isSystemClone,
+              !candidate.isNativeOverflowControl
+        else {
+            return false
+        }
+        if MenuBarItemTag.isGenericItemTitle(tag.title) || MenuBarItemTag.isGenericItemTitle(candidate.tag.title) {
+            return true
+        }
+        if case let .string(bundleID) = tag.namespace {
+            return MenuBarItemTag.hasVolatileTitles(bundleID)
+        }
+        return false
+    }
+
     /// Whether AX reports this item parked outside the live bar. During
     /// assertion reflows macOS 27 parks items around y 1400 with a hidden-side
     /// X, which would falsely trigger divergence detection and reorders.

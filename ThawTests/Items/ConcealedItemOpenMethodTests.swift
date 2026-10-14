@@ -16,7 +16,7 @@ struct ConcealedItemOpenMethodTests {
     func defaultLeftOrder() {
         #expect(
             ConcealedItemOpenMethod.openMethodOrder(for: .left, learned: nil)
-                == [.pressInPlace, .revealInPlace]
+                == [.pressInPlace, .revealInPlace, .clickInPlace]
         )
     }
 
@@ -24,7 +24,7 @@ struct ConcealedItemOpenMethodTests {
     func learnedMethodLeads() {
         #expect(
             ConcealedItemOpenMethod.openMethodOrder(for: .left, learned: .revealInPlace)
-                == [.revealInPlace, .pressInPlace]
+                == [.revealInPlace, .pressInPlace, .clickInPlace]
         )
     }
 
@@ -44,15 +44,37 @@ struct ConcealedItemOpenMethodTests {
     func showInMenuBarRevealsFirst() {
         #expect(
             ConcealedItemOpenMethod.openMethodOrder(for: .left, learned: nil, showInMenuBar: true)
-                == [.revealInPlace, .pressInPlace]
+                == [.revealInPlace, .clickInPlace, .pressInPlace]
         )
         #expect(
             ConcealedItemOpenMethod.openMethodOrder(for: .left, learned: .pressInPlace, showInMenuBar: true)
-                == [.revealInPlace, .pressInPlace]
+                == [.revealInPlace, .clickInPlace, .pressInPlace]
         )
         #expect(
             ConcealedItemOpenMethod.openMethodOrder(for: .right, learned: nil, showInMenuBar: true)
                 == [.revealInPlace]
+        )
+    }
+
+    @Test("an unverified press sends the next request to a real click, not another press")
+    func unverifiedPressGoesToClick() {
+        #expect(
+            ConcealedItemOpenMethod.openMethodOrder(for: .left, learned: nil, unverified: [.pressInPlace])
+                == [.clickInPlace, .pressInPlace, .revealInPlace]
+        )
+        #expect(
+            ConcealedItemOpenMethod.openMethodOrder(
+                for: .left, learned: .revealInPlace, showInMenuBar: true, unverified: [.revealInPlace]
+            ) == [.clickInPlace, .revealInPlace, .pressInPlace]
+        )
+    }
+
+    @Test("once every method went unverified the order starts over")
+    func allUnverifiedStartsOver() {
+        #expect(
+            ConcealedItemOpenMethod.openMethodOrder(
+                for: .left, learned: nil, unverified: [.pressInPlace, .clickInPlace]
+            ) == [.pressInPlace, .revealInPlace, .clickInPlace]
         )
     }
 }

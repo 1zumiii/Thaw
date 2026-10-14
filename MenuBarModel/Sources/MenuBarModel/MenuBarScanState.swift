@@ -20,7 +20,8 @@ public enum MenuBarScanScope: Sendable {
 }
 
 /// Fair scheduling and per-process retention for a budgeted AX inventory.
-/// A successful empty answer removes items; a timeout or unvisited owner does not.
+/// A successful empty answer removes items; a timeout, a failed read or an
+/// unvisited owner does not.
 public struct MenuBarScanState<Observation: Sendable>: Sendable {
     public struct Pass: Sendable {
         public let generation: UInt64
@@ -34,6 +35,14 @@ public struct MenuBarScanState<Observation: Sendable>: Sendable {
     private var attempted: [Int32: UInt64] = [:]
     private var observed: [Int32: UInt64] = [:]
     private var observedAt: [Int32: ContinuousClock.Instant] = [:]
+    private var failedReads: [Int32: Int] = [:]
+
+    /// Consecutive failed reads after which an owner's items count as gone.
+    /// An owner that quit its bar while its accessibility server broke would
+    /// otherwise hold stale items, and every pass incomplete, indefinitely.
+    public static var failedReadsBeforeDeparture: Int {
+        3
+    }
 
     public init() {}
 
@@ -50,6 +59,7 @@ public struct MenuBarScanState<Observation: Sendable>: Sendable {
         attempted = attempted.filter { running.contains($0.key) }
         observed = observed.filter { running.contains($0.key) }
         observedAt = observedAt.filter { running.contains($0.key) }
+        failedReads = failedReads.filter { running.contains($0.key) }
         queue.removeAll { !running.contains($0) }
         let queued = Set(queue)
         // Ahead of the rotation: a process that just launched is where a new
@@ -94,8 +104,33 @@ public struct MenuBarScanState<Observation: Sendable>: Sendable {
     ) {
         guard attempted[owner] == generation, owners.contains(owner) else { return }
         retained[owner] = items
+        failedReads[owner] = nil
         observed[owner] = generation
         observedAt[owner] = instant
+    }
+
+    /// Records a read of owner that failed instead of answering.
+    ///
+    /// A failure proves nothing about the owner's items, so one that had items
+    /// keeps them, unobserved: this pass is neither complete nor fresh for it.
+    /// An owner with nothing retained records an empty answer, since processes
+    /// without an accessibility server fail every read.
+    ///
+    /// - Returns: Whether the owner's previous items were kept.
+    @discardableResult
+    public mutating func recordFailedRead(
+        owner: Int32,
+        generation: UInt64,
+        at instant: ContinuousClock.Instant = .now
+    ) -> Bool {
+        guard attempted[owner] == generation, owners.contains(owner) else { return false }
+        let streak = (failedReads[owner] ?? 0) + 1
+        if retained[owner]?.isEmpty == false, streak < Self.failedReadsBeforeDeparture {
+            failedReads[owner] = streak
+            return true
+        }
+        record([], owner: owner, generation: generation, at: instant)
+        return false
     }
 
     public var observations: [Observation] {

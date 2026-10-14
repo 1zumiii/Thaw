@@ -301,7 +301,8 @@ extension MenuBarItemManager {
     /// nearest the original X is the same logical item. Restricted to
     /// volatile-title third-party items; system items share one namespace and
     /// owning PID, so positional guessing would conflate them, and their stable
-    /// titles already resolve through the title-based fallbacks.
+    /// titles already resolve through the title-based fallbacks. A stably
+    /// titled item whose entry is missing is not re-located onto a sibling.
     private static nonisolated func nearestSameOwnerMatch(
         for item: MenuBarItem,
         in refreshed: [MenuBarItem]
@@ -310,7 +311,7 @@ extension MenuBarItemManager {
         guard item.bounds.width > 0 else { return nil }
         let tolerance = max(item.bounds.width, 24)
         return refreshed
-            .filter { $0.hasSameOwner(as: item) && !$0.isSystemClone && !$0.isNativeOverflowControl }
+            .filter { item.mayBeRetitled(as: $0) }
             .filter { abs($0.bounds.minX - item.bounds.minX) <= tolerance }
             .min { abs($0.bounds.minX - item.bounds.minX) < abs($1.bounds.minX - item.bounds.minX) }
     }

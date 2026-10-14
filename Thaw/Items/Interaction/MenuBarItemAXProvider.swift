@@ -73,14 +73,17 @@ nonisolated enum MenuBarItemAXProvider {
     /// Every consumer must see the same identities, or the position store
     /// resolves a positional name like Item-3 against an unrelated row.
     /// See MenuBarAgentIdentityReconciler.
-    private static func restoredIdentities(_ items: [MenuBarItem]) -> [MenuBarItem] {
-        MenuBarAgentIdentityReconciler.reconciling(items).items
+    ///
+    /// remembers is false for truncated walks and owner-scoped subsets, which
+    /// must not replace the reconciler's whole-bar memory.
+    private static func restoredIdentities(_ items: [MenuBarItem], remembers: Bool = true) -> [MenuBarItem] {
+        MenuBarAgentIdentityReconciler.reconciling(items, remembers: remembers).items
     }
 
     private static func restoredIdentities(_ snapshot: InventorySnapshot) -> InventorySnapshot {
         InventorySnapshot(
             items: restoredIdentities(snapshot.items),
-            freshItems: restoredIdentities(snapshot.freshItems),
+            freshItems: restoredIdentities(snapshot.freshItems, remembers: false),
             completed: snapshot.completed,
             hasFreshKnownInventory: snapshot.hasFreshKnownInventory,
             hasFreshMoveInventory: snapshot.hasFreshMoveInventory
@@ -114,27 +117,26 @@ nonisolated enum MenuBarItemAXProvider {
             return ContinuousClock.now >= deadline
         }
 
+        var hasFailedItemOwner = false
+
         for runningApp in NSWorkspace.shared.runningApplications {
             if isOutOfTime {
                 diagLog.warning(
                     "menuBarItems: walk exceeded its budget before \(runningApp.bundleIdentifier ?? "(unnamed)"); returning incomplete"
                 )
-                return (restoredIdentities(assemble(raw)), false)
+                return (restoredIdentities(assemble(raw), remembers: false), false)
             }
             let appBundleID = runningApp.bundleIdentifier ?? runningApp.localizedName ?? "(pid \(runningApp.processIdentifier))"
 
-            guard let app = AXHelpers.application(for: runningApp) else {
-                continue
-            }
-            guard let bar = AXHelpers.extrasMenuBar(for: app) else {
-                // Without its own extras bar Thaw cannot find its control items.
-                if runningApp.bundleIdentifier == ourBundleID {
-                    diagLog.warning("menuBarItems: Thaw (\(appBundleID)) has no AXExtrasMenuBar, control items cannot be discovered")
-                }
+            guard let (bar, children) = syncExtrasBar(
+                of: runningApp,
+                appBundleID: appBundleID,
+                ourBundleID: ourBundleID,
+                hasFailedItemOwner: &hasFailedItemOwner
+            ) else {
                 continue
             }
 
-            let children = AXHelpers.children(for: bar)
             diagLog.debug("menuBarItems: \(appBundleID) → \(children.count) child(ren) in AXExtrasMenuBar")
             guard !children.isEmpty else {
                 continue
@@ -157,7 +159,7 @@ nonisolated enum MenuBarItemAXProvider {
                     diagLog.warning(
                         "menuBarItems: walk exceeded its budget inside \(appBundleID); returning incomplete"
                     )
-                    return (restoredIdentities(assemble(raw)), false)
+                    return (restoredIdentities(assemble(raw), remembers: false), false)
                 }
                 // One message for all five attributes costs the same as the
                 // frame alone.
@@ -221,8 +223,74 @@ nonisolated enum MenuBarItemAXProvider {
 
         let items = assemble(raw)
         diagLog.debug("menuBarItems: enumerated \(items.count) items via AX (display=\(display.map { "\($0)" } ?? "all"))")
+        guard acceptSyncWalk(itemOwners: Set(raw.map(\.ownerPID)), hasFailedItemOwner: hasFailedItemOwner) else {
+            return (restoredIdentities(items, remembers: false), false)
+        }
         return (restoredIdentities(items), true)
     }
+
+    /// One app's extras bar and its children for the synchronous walk, or nil
+    /// when the app has no bar or reading it failed.
+    ///
+    /// A failed read proves nothing about the owner's items. Only an owner
+    /// that had items sets hasFailedItemOwner: processes without an
+    /// accessibility server fail every read.
+    private static func syncExtrasBar(
+        of runningApp: NSRunningApplication,
+        appBundleID: String,
+        ourBundleID: String?,
+        hasFailedItemOwner: inout Bool
+    ) -> (bar: AXSwift6.UIElement, children: [AXSwift6.UIElement])? {
+        guard let app = AXHelpers.application(for: runningApp) else {
+            return nil
+        }
+        let bar: AXSwift6.UIElement?
+        let children: [AXSwift6.UIElement]
+        do {
+            bar = try AXHelpers.readExtrasMenuBar(for: app)
+            children = try bar.map(AXHelpers.readChildren(for:)) ?? []
+        } catch {
+            let pid = runningApp.processIdentifier
+            if syncItemOwners.withLock({ $0.owners.contains(pid) }) {
+                diagLog.warning("menuBarItems: reading \(appBundleID) failed (\(error)); walk incomplete")
+                hasFailedItemOwner = true
+            }
+            return nil
+        }
+        guard let bar else {
+            // Without its own extras bar Thaw cannot find its control items.
+            if runningApp.bundleIdentifier == ourBundleID {
+                diagLog.warning("menuBarItems: Thaw (\(appBundleID)) has no AXExtrasMenuBar, control items cannot be discovered")
+            }
+            return nil
+        }
+        return (bar, children)
+    }
+
+    /// Whether a synchronous walk counts as complete, recording its item
+    /// owners when it does. An owner that keeps failing must not hold every
+    /// walk incomplete, so past the limit its items count as gone.
+    private static func acceptSyncWalk(itemOwners: Set<pid_t>, hasFailedItemOwner: Bool) -> Bool {
+        syncItemOwners.withLock { ledger in
+            if hasFailedItemOwner {
+                ledger.failedWalks += 1
+                guard ledger.failedWalks >= MenuBarScanState<RawItem>.failedReadsBeforeDeparture else {
+                    return false
+                }
+            }
+            ledger = SyncItemOwners(owners: itemOwners, failedWalks: 0)
+            return true
+        }
+    }
+
+    /// Owners that had items in the last complete synchronous walk, and how
+    /// many walks since were left incomplete by a failed read of one of them.
+    private struct SyncItemOwners {
+        var owners: Set<pid_t> = []
+        var failedWalks = 0
+    }
+
+    private static let syncItemOwners = OSAllocatedUnfairLock(initialState: SyncItemOwners())
 
     /// Owners that missed their per-app deadline. Cooldowns expire, so an app
     /// slow once in a launch storm is not banished; see SlowResponderLedger.
@@ -413,8 +481,8 @@ nonisolated enum MenuBarItemAXProvider {
                         formerHosts: formerHosts
                     )
                 }
-                appsWithExtrasBar += own.isEmpty ? 0 : 1
-                state.record(own, owner: ownerPID, generation: pass.generation)
+                record(own, owner: ownerPID, appBundleID: appBundleID, generation: pass.generation, into: &state)
+                appsWithExtrasBar += own.items?.isEmpty == false ? 1 : 0
                 continue
             }
             let collected = Task.detached(priority: .userInitiated) {
@@ -447,7 +515,8 @@ nonisolated enum MenuBarItemAXProvider {
                 // when it arrives, but do not label the owner a slow responder.
                 truncated = true
                 Task {
-                    let late = await collected.value
+                    // A failed late read proves nothing; the next walk asks again.
+                    guard let late = await collected.value.items else { return }
                     await Self.lateAnswers.send(LateAnswer(ownerPID: ownerPID, generation: pass.generation, raw: late))
                 }
             case .none:
@@ -464,14 +533,15 @@ nonisolated enum MenuBarItemAXProvider {
                 Task {
                     let late = await collected.value
                     slowResponders.withLock { $0.lateAnswerArrived(ownerPID) }
-                    await Self.lateAnswers.send(LateAnswer(ownerPID: ownerPID, generation: pass.generation, raw: late))
+                    guard let raw = late.items else { return }
+                    await Self.lateAnswers.send(LateAnswer(ownerPID: ownerPID, generation: pass.generation, raw: raw))
                 }
             case let .some(result):
                 slowResponders.withLock { $0.answered(ownerPID) }
-                if !result.isEmpty {
+                if result.items?.isEmpty == false {
                     appsWithExtrasBar += 1
                 }
-                state.record(result, owner: ownerPID, generation: pass.generation)
+                record(result, owner: ownerPID, appBundleID: appBundleID, generation: pass.generation, into: &state)
             }
         }
 
@@ -518,11 +588,42 @@ nonisolated enum MenuBarItemAXProvider {
         })
     }
 
-    private typealias CollectAppResult = [RawItem]
+    /// One app's answer to the walk.
+    private enum CollectAppResult: Sendable {
+        /// The app answered. No extras bar or no children is an empty answer.
+        case items([RawItem])
+        /// Reading the app failed, which proves nothing about its items.
+        case readFailed(AXError)
 
-    /// The per-app enumeration body shared by both walks. Returns the app's
-    /// raw items; an app with no extras bar or no children contributes an
-    /// empty array.
+        var items: [RawItem]? {
+            if case let .items(items) = self { items } else { nil }
+        }
+    }
+
+    /// Records one app's answer: items replace the owner's, a failed read
+    /// keeps what it had (see MenuBarScanState.recordFailedRead).
+    private static func record(
+        _ result: CollectAppResult,
+        owner: pid_t,
+        appBundleID: String,
+        generation: UInt64,
+        into state: inout MenuBarScanState<RawItem>
+    ) {
+        switch result {
+        case let .items(items):
+            state.record(items, owner: owner, generation: generation)
+        case let .readFailed(error):
+            if state.recordFailedRead(owner: owner, generation: generation) {
+                diagLog.warning(
+                    "menuBarItems: reading \(appBundleID) failed (\(error.rawValue)); keeping its previous items"
+                )
+            }
+        }
+    }
+
+    /// The per-app enumeration body shared by both walks. An app with no
+    /// extras bar or no children answers with no items; a read that failed
+    /// is reported as such, never as an empty bar.
     private static func collectApp(
         runningApp: NSRunningApplication,
         appBundleID: String,
@@ -530,24 +631,31 @@ nonisolated enum MenuBarItemAXProvider {
         displayBounds: CGRect?,
         ourBundleID: String?,
         formerHosts: Set<String>
-    ) -> [RawItem] {
+    ) -> CollectAppResult {
         guard let app = AXHelpers.application(for: runningApp) else {
-            return []
+            return .items([])
         }
-        guard let bar = AXHelpers.extrasMenuBar(for: app) else {
+        let bar: AXSwift6.UIElement?
+        let children: [AXSwift6.UIElement]
+        do {
+            bar = try AXHelpers.readExtrasMenuBar(for: app)
+            children = try bar.map(AXHelpers.readChildren(for:)) ?? []
+        } catch {
+            return .readFailed(error as? AXError ?? .failure)
+        }
+        guard let bar else {
             if runningApp.bundleIdentifier == ourBundleID {
                 diagLog.warning(
                     "menuBarItems: Thaw (\(appBundleID)) has no AXExtrasMenuBar, control items cannot be discovered"
                 )
             }
             logEmptyExtrasBarReadOnce(for: runningApp, appBundleID: appBundleID, hasBar: false, formerHosts: formerHosts)
-            return []
+            return .items([])
         }
 
-        let children = AXHelpers.children(for: bar)
         guard !children.isEmpty else {
             logEmptyExtrasBarReadOnce(for: runningApp, appBundleID: appBundleID, hasBar: true, formerHosts: formerHosts)
-            return []
+            return .items([])
         }
 
         let namespace = namespace(for: runningApp)
@@ -613,7 +721,7 @@ nonisolated enum MenuBarItemAXProvider {
             }
             raw.append(item)
         }
-        return raw
+        return .items(raw)
     }
 
     /// Logs, once per owner and AX result, why an app that had menu bar items
@@ -1453,20 +1561,23 @@ nonisolated enum MenuBarItemAXProvider {
     /// their owning app.
     ///
     /// Keeps the direct-app copy, whose owner is right for persistence;
-    /// agent-only entries are preserved.
+    /// agent-only entries are preserved. A shared origin only nominates a
+    /// copy: an extra the agent names with Apple's identifier can be a re-vend
+    /// of an Apple process's item, never of a third-party one, so a stale
+    /// third-party frame on its seat cannot remove it.
     ///
     /// sorted must be ordered by bounds.minX.
     static func dropDuplicateMenuBarAgentRevends(_ sorted: [RawItem]) -> [RawItem] {
-        let directOrigins = sorted
-            .filter { $0.namespace != .menuBarAgent }
-            .map { CGPoint(x: $0.bounds.minX, y: $0.bounds.minY) }
-        guard !directOrigins.isEmpty else { return sorted }
+        let directEntries = sorted.filter { $0.namespace != .menuBarAgent }
+        guard !directEntries.isEmpty else { return sorted }
 
         return sorted.filter { entry in
             guard entry.namespace == .menuBarAgent else { return true }
-            let hasDirectTwin = directOrigins.contains {
-                abs($0.x - entry.bounds.minX) <= duplicateRevendPositionTolerance &&
-                    abs($0.y - entry.bounds.minY) <= duplicateRevendPositionTolerance
+            let isAppleIdentified = entry.identityTitle.hasPrefix("com.apple.")
+            let hasDirectTwin = directEntries.contains { direct in
+                abs(direct.bounds.minX - entry.bounds.minX) <= duplicateRevendPositionTolerance &&
+                    abs(direct.bounds.minY - entry.bounds.minY) <= duplicateRevendPositionTolerance &&
+                    (!isAppleIdentified || direct.namespace.description.hasPrefix("com.apple."))
             }
             if hasDirectTwin {
                 diagLog.debug(

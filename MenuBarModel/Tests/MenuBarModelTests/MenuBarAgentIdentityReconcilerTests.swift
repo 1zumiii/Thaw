@@ -165,6 +165,20 @@ struct MenuBarAgentIdentityReconcilerTests {
         #expect(result.items[1].tag.title == "Item-9")
     }
 
+    @Test("An identity this walk already read is never handed to an unnamed neighbour")
+    func claimedIdentityIsNotDuplicated() {
+        // Wi-Fi moved right with its identifier intact; an unnamed extra took
+        // its old slot. Both carrying Wi-Fi would collapse two rows into one.
+        let fresh = [
+            Self.unnamed(index: 0, x: 2038, width: 22),
+            Self.extra("com.apple.menuextra.wifi", x: 2078, width: 22),
+        ]
+        let result = MenuBarAgentIdentityReconciler.reconcile(fresh: fresh, previous: Self.identifiedBar)
+        #expect(result.restoredCount == 0)
+        #expect(result.items[0].tag.title == "Item-0")
+        #expect(Set(result.items.map(\.uniqueIdentifier)).count == result.items.count)
+    }
+
     // MARK: Stateful front
 
     @Suite(.serialized)
@@ -209,6 +223,29 @@ struct MenuBarAgentIdentityReconcilerTests {
             let result = MenuBarAgentIdentityReconciler.reconciling(fresh)
             #expect(result.restoredCount == 1)
             #expect(result.items[0].tag.title == "com.apple.menuextra.wifi")
+        }
+
+        @Test("A partially restored walk does not shrink the snapshot")
+        func restoredWalkKeepsWholeSnapshot() {
+            _ = MenuBarAgentIdentityReconciler.reconciling(MenuBarAgentIdentityReconcilerTests.identifiedBar)
+            // Only Wi-Fi's slot answered, unnamed; it restores from the snapshot.
+            let wifiOnly = [MenuBarAgentIdentityReconcilerTests.unnamed(index: 0, x: 2038, width: 22)]
+            #expect(MenuBarAgentIdentityReconciler.reconciling(wifiOnly).restoredCount == 1)
+            // The clock's identity must still be there for the next slot.
+            let clockOnly = [MenuBarAgentIdentityReconcilerTests.unnamed(index: 0, x: 2483, width: 57)]
+            let result = MenuBarAgentIdentityReconciler.reconciling(clockOnly)
+            #expect(result.restoredCount == 1)
+            #expect(result.items[0].tag.title == "com.apple.menuextra.clock")
+        }
+
+        @Test("A subset walk that is not remembered leaves the snapshot alone")
+        func unrememberedSubsetKeepsSnapshot() {
+            _ = MenuBarAgentIdentityReconciler.reconciling(MenuBarAgentIdentityReconcilerTests.identifiedBar)
+            let subset = [MenuBarAgentIdentityReconcilerTests.extra("com.apple.menuextra.wifi", x: 2038, width: 22)]
+            _ = MenuBarAgentIdentityReconciler.reconciling(subset, remembers: false)
+            let fresh = [MenuBarAgentIdentityReconcilerTests.unnamed(index: 1, x: 2006, width: 16)]
+            let result = MenuBarAgentIdentityReconciler.reconciling(fresh)
+            #expect(result.items[0].tag.title == "com.apple.menuextra.bluetooth")
         }
     }
 }

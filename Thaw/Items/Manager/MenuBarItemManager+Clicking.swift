@@ -71,7 +71,7 @@ extension MenuBarItemManager {
             return bounds.center
         }
         let displayBounds = CGDisplayBounds(screen.displayID)
-        guard pointer.y >= displayBounds.maxY - menuBarHeight else {
+        guard MirroredBarGeometry.isInMenuBar(pointer, of: displayBounds, menuBarHeight: menuBarHeight) else {
             return bounds.center
         }
         let allDisplayBounds = NSScreen.allDisplayBoundsCG
@@ -264,6 +264,9 @@ extension MenuBarItemManager {
     ///   - skipInputPause: Post right away instead of first waiting for the
     ///     user to stop driving the pointer.
     ///   - maxAttempts: Maximum number of click attempts (default 3).
+    ///   - allowsDirectPress: Whether the accessibility press may stand in
+    ///     for the click. A press the owner takes is never followed by a
+    ///     click, since the owner may have acted without showing it.
     /// - Returns: What the owner was observed to do in response. Callers
     ///   that need the window the click opened can read it from here
     ///   instead of scanning for it themselves.
@@ -273,7 +276,7 @@ extension MenuBarItemManager {
         with mouseButton: CGMouseButton,
         skipInputPause: Bool = false,
         maxAttempts: Int = 3,
-        requireObservedReaction: Bool = false
+        allowsDirectPress: Bool = true
     ) async throws -> ClickReactionVerifier.Reaction {
         guard let appState else {
             throw EventError.cannotComplete
@@ -293,7 +296,7 @@ extension MenuBarItemManager {
         // An owner marked unresponsive is deliberately not skipped here: the
         // mark records that it drops synthetic events, which is the case this
         // path is most likely to succeed at.
-        if mouseButton == .left {
+        if mouseButton == .left, allowsDirectPress {
             if let reaction = await MenuBarItemDirectPresser.press(item: item) {
                 if reaction.didReact {
                     MenuBarItemManager.diagLog.debug(
@@ -302,17 +305,13 @@ extension MenuBarItemManager {
                     failureLedger.recordSuccess(for: item)
                     return reaction
                 }
-                // Some owners accept the press and open nothing. Callers that
-                // need a reaction post a real click; a second activation would re-toggle the rest.
-                guard requireObservedReaction else {
-                    MenuBarItemManager.diagLog.debug(
-                        "Pressed \(item.logString) without synthesizing events; no reaction seen"
-                    )
-                    return reaction
-                }
+                // Some owners accept the press and open nothing, but a toggle
+                // flips without showing it, so a click here could undo it.
+                // The concealed-item path asks for a real click next time.
                 MenuBarItemManager.diagLog.debug(
-                    "\(item.logString) took the press but was not seen reacting; posting a real click"
+                    "Pressed \(item.logString) without synthesizing events; no reaction seen"
                 )
+                return reaction
             }
         }
 
@@ -378,17 +377,22 @@ extension MenuBarItemManager {
     }
 
     /// Reveals item at its own menu bar position, clicks it, then schedules
-    /// the re-conceal. Returns whether the owner was seen reacting.
+    /// the re-conceal. Reports whether the click reached the owner and
+    /// whether the owner was seen reacting.
     ///
     /// No move, so it works for items the move path cannot seat. It is also
     /// the only way to right-click: AXPress opens the default action, not the
     /// secondary menu.
+    ///
+    /// - Parameter allowsDirectPress: False posts a real click even where an
+    ///   accessibility press would land, for owners that ignore the press.
     func revealInPlaceAndClick(
         item: MenuBarItem,
         with mouseButton: CGMouseButton,
         on displayID: CGDirectDisplayID,
-        controller: any MenuBarSectionControlling
-    ) async -> Bool {
+        controller: any MenuBarSectionControlling,
+        allowsDirectPress: Bool = true
+    ) async -> ConcealedItemOpenAttempt {
         let identifier = item.uniqueIdentifier
         controller.revealItemTemporarily(identifier)
 
@@ -396,32 +400,40 @@ extension MenuBarItemManager {
         // isWindowOnScreen: macOS 27 status items carry synthetic window IDs.
         await eventSleep(for: Constants.MenuBarTuning.thawBarRevealSettle)
 
-        // Re-fetch live bounds; a transient "Item-N" title can change between
-        // enumerations, so fall back to same-owner, then the cached item.
+        // Re-fetch live bounds. A transient "Item-N" title can change between
+        // enumerations, so a lone same-owner item that may be this one under a
+        // new title stands in. Anything else is another icon: never click it.
         let liveItems = await MenuBarItem.getMenuBarItems(on: displayID, option: .onScreen)
-        let liveItem = liveItems.first { $0.hasSameIdentity(as: item) }
-            ?? liveItems.first { $0.hasSameOwner(as: item) }
-            ?? item
+        let retitled = liveItems.filter { item.mayBeRetitled(as: $0) }
+        guard let liveItem = liveItems.first(where: { $0.hasSameIdentity(as: item) })
+            ?? (retitled.count == 1 ? retitled.first : nil)
+        else {
+            MenuBarItemManager.diagLog.warning(
+                "revealInPlaceAndClick: \(item.logString) is not on the bar after the reveal; not clicking"
+            )
+            controller.concealTemporarilyRevealedItem(identifier)
+            return .notDelivered
+        }
 
-        let reacted: Bool
+        let reaction: ClickReactionVerifier.Reaction
         do {
-            reacted = try await click(item: liveItem, with: mouseButton, requireObservedReaction: true).didReact
+            reaction = try await click(item: liveItem, with: mouseButton, allowsDirectPress: allowsDirectPress)
         } catch {
             MenuBarItemManager.diagLog.error(
                 "revealInPlaceAndClick: click failed for \(item.logString): \(error)"
             )
-            reacted = false
-        }
-        guard reacted else {
-            // Nothing opened, so nothing to wait for; the next method starts
-            // from a concealed item.
             controller.concealTemporarilyRevealedItem(identifier)
-            return false
+            return .notDelivered
+        }
+        guard reaction.didReact else {
+            // Nothing opened, so nothing to wait for.
+            controller.concealTemporarilyRevealedItem(identifier)
+            return .deliveredUnobserved
         }
 
         // Let the opened menu settle before scheduling the re-conceal.
         await eventSleep(for: Constants.MenuBarTuning.thawBarPostClickSettle)
         controller.scheduleTemporaryItemConceal(identifier)
-        return true
+        return .reacted
     }
 }

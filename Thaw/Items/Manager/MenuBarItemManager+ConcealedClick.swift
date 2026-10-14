@@ -65,47 +65,109 @@ extension MenuBarItemManager {
         let menusBefore = ownerMenuWindowIDs(item)
         if mouseButton == .left, let opened = menusOpenedByClick[key], !opened.isDisjoint(with: menusBefore) {
             menusOpenedByClick[key] = nil
-            let reacted = await pressConcealedItemInPlace(item)
+            let attempt = await pressConcealedItemInPlace(item)
             MenuBarItemManager.diagLog.info(
                 "clickConcealedItem: \(item.logString) had its menu open; pressed once to close it"
             )
-            return .completed(reactionObserved: reacted)
+            return .completed(reactionObserved: attempt == .reacted)
         }
 
-        // Apps answer different methods, so try them cheapest first, stop at
-        // the first one the owner reacts to, and start there next time.
+        return await openConcealedItem(
+            item,
+            with: mouseButton,
+            on: displayID,
+            controller: controller,
+            menusBefore: menusBefore
+        )
+    }
+
+    /// Tries the open methods in order until one reaches the owner.
+    ///
+    /// Apps answer different methods, so they are tried cheapest first, the
+    /// first one the owner reacts to is remembered, and the next request starts there.
+    private func openConcealedItem(
+        _ item: MenuBarItem,
+        with mouseButton: CGMouseButton,
+        on displayID: CGDirectDisplayID,
+        controller: any MenuBarSectionControlling,
+        menusBefore: Set<CGWindowID>
+    ) async -> MenuBarItemActivationOutcome {
+        let key = MenuBarItemTag.canonicalPersistentIdentifier(item.uniqueIdentifier)
+        // Only a method that never reached the owner hands over to the next:
+        // one the owner took may have acted unseen, and repeating it would undo a toggle.
         let identity = openMethodIdentity(for: item)
         let learned = learnedOpenMethod(for: identity)
         let showInMenuBar = appState?.settings.general.openHiddenItemsInMenuBar ?? false
-        for method in ConcealedItemOpenMethod.openMethodOrder(for: mouseButton, learned: learned, showInMenuBar: showInMenuBar) {
-            let opened = switch method {
+        let unverified = recentUnverifiedOpenMethods(for: identity)
+        for method in ConcealedItemOpenMethod.openMethodOrder(
+            for: mouseButton,
+            learned: learned,
+            showInMenuBar: showInMenuBar,
+            unverified: unverified
+        ) {
+            let attempt = switch method {
             case .pressInPlace:
                 await pressConcealedItemInPlace(item)
             case .revealInPlace:
                 await revealInPlaceAndClick(item: item, with: mouseButton, on: displayID, controller: controller)
+            case .clickInPlace:
+                await revealInPlaceAndClick(
+                    item: item,
+                    with: mouseButton,
+                    on: displayID,
+                    controller: controller,
+                    allowsDirectPress: false
+                )
             }
-            if opened {
+            switch attempt {
+            case .reacted:
                 MenuBarItemManager.diagLog.info(
                     "clickConcealedItem: opened \(item.logString) via \(method.rawValue)"
                 )
                 menusOpenedByClick[key] = ownerMenuWindowIDs(item).subtracting(menusBefore)
+                unverifiedOpenMethods[identity.key] = nil
                 rememberOpenMethod(method, for: identity)
                 return .completed(reactionObserved: true)
+            case .deliveredUnobserved:
+                // Show the real icon for the temporary-show interval: the user
+                // sees the result, and can click it if the owner ignored this.
+                MenuBarItemManager.diagLog.info(
+                    "clickConcealedItem: \(item.logString) took \(method.rawValue) without a visible reaction; not repeating it"
+                )
+                unverifiedOpenMethods[identity.key] = (unverified.union([method]), .now)
+                controller.revealItemTemporarily(item.uniqueIdentifier)
+                controller.scheduleTemporaryItemConceal(item.uniqueIdentifier)
+                return .completed(reactionObserved: false)
+            case .notDelivered:
+                MenuBarItemManager.diagLog.debug(
+                    "clickConcealedItem: \(method.rawValue) did not reach \(item.logString); trying the next method"
+                )
             }
-            MenuBarItemManager.diagLog.debug(
-                "clickConcealedItem: \(method.rawValue) did not open \(item.logString); trying the next method"
-            )
         }
 
-        // Nothing opened it. Leave it in the bar for the temporary-show
+        // Nothing reached it. Leave it in the bar for the temporary-show
         // interval so the user can click the real icon.
         forgetOpenMethod(for: identity)
         MenuBarItemManager.diagLog.warning(
-            "clickConcealedItem: no method opened \(item.logString); leaving it shown in the menu bar"
+            "clickConcealedItem: no method reached \(item.logString); leaving it shown in the menu bar"
         )
         controller.revealItemTemporarily(item.uniqueIdentifier)
         controller.scheduleTemporaryItemConceal(item.uniqueIdentifier)
         return .activationFailed
+    }
+
+    /// How long an unverified method stays demoted. Long enough to cover the
+    /// user clicking again because nothing seemed to happen, short enough that
+    /// a toggle clicked later goes back to the quiet press.
+    private static let unverifiedOpenMethodWindow = Duration.seconds(15)
+
+    private func recentUnverifiedOpenMethods(for identity: OpenMethodIdentity) -> Set<ConcealedItemOpenMethod> {
+        guard let entry = unverifiedOpenMethods[identity.key] else { return [] }
+        guard ContinuousClock.now - entry.at < Self.unverifiedOpenMethodWindow else {
+            unverifiedOpenMethods[identity.key] = nil
+            return []
+        }
+        return entry.methods
     }
 
     /// The owner's windows on screen at pop-up menu level. Not the status bar
@@ -121,7 +183,7 @@ extension MenuBarItemManager {
     /// Presses the item's AX element without revealing it. Returns whether the
     /// owner reacted. The extras-bar press is frame-matched, so it goes first;
     /// the hosted press covers MenuBarAgent's parked, frameless elements.
-    private func pressConcealedItemInPlace(_ item: MenuBarItem) async -> Bool {
+    private func pressConcealedItemInPlace(_ item: MenuBarItem) async -> ConcealedItemOpenAttempt {
         let snapshot = ClickReactionVerifier.snapshot(for: item)
         let ownPress = await pressItemViaAccessibility(item)
         var pressed = ownPress
@@ -132,12 +194,12 @@ extension MenuBarItemManager {
             MenuBarItemManager.diagLog.debug(
                 "pressInPlace: no press landed for \(item.logString) pid=\(resolvedPID(for: item)) owner=\(item.ownerPID) bounds=\(item.bounds)"
             )
-            return false
+            return .notDelivered
         }
         let reaction = await ClickReactionVerifier.verify(against: snapshot)
         MenuBarItemManager.diagLog.debug(
             "pressInPlace: pressed \(item.logString) via \(ownPress ? "own bar" : "hosted"); reacted=\(reaction.didReact)"
         )
-        return reaction.didReact
+        return reaction.didReact ? .reacted : .deliveredUnobserved
     }
 }

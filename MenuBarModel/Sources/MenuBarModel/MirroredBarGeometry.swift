@@ -23,6 +23,16 @@ public enum MirroredBarGeometry {
         )
     }
 
+    /// Whether point, in Core Graphics coordinates (top-left origin), lies in
+    /// the menu bar band at the top of display.
+    public static func isInMenuBar(
+        _ point: CGPoint,
+        of display: CGRect,
+        menuBarHeight: CGFloat
+    ) -> Bool {
+        display.contains(point) && point.y < display.minY + menuBarHeight
+    }
+
     /// Finds the source display by frame midpoint, then rebases to destinationDisplay.
     /// Frames already there or outside every known display remain unchanged.
     public static func frame(

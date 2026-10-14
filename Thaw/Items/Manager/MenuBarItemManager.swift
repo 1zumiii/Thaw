@@ -128,6 +128,12 @@ final class MenuBarItemManager {
     /// keeps on screen at menu level is never taken for an open menu.
     @ObservationIgnored var menusOpenedByClick = [String: Set<CGWindowID>]()
 
+    /// Open methods that recently reached each item's owner without a visible
+    /// reaction, by canonical identifier. The next request within the window
+    /// tries another method instead of repeating one that may have toggled
+    /// the item. See ConcealedItemOpenMethod.openMethodOrder.
+    @ObservationIgnored var unverifiedOpenMethods = [String: (methods: Set<ConcealedItemOpenMethod>, at: ContinuousClock.Instant)]()
+
     /// Recomputes the narrowed views of the cache after a write.
     ///
     /// Each assignment is guarded against writing an equal value back:
